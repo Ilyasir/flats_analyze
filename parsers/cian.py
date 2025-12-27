@@ -115,35 +115,50 @@ def get_building_type(soup: BeautifulSoup) -> str | None:
     return None
 
 
-def get_underground(soup: BeautifulSoup) -> dict | None:
+def get_undergrounds(soup: BeautifulSoup) -> list | None:
+    underground_list = []
     ul = soup.find("ul", {"data-name": "UndergroundList"})
+    if not ul: return None
+
+    items = ul.find_all("li", {"data-name": "UndergroundItem"})
     
-    if not ul:
-        return None
+    for item in items:
+        link_tag = item.find("a")
+        if not link_tag: continue
+        name = link_tag.get_text(strip=True)
 
-    item = ul.find("li", {"data-name": "UndergroundItem"})
-    
-    if not item:
-        return None
-
-    try:
-
-        name_tag = item.find("a")
-        name = name_tag.get_text(strip=True) if name_tag else "Неизвестно"
+        all_spans = item.find_all("span")
         
-        spans = item.find_all("span")
-        minutes_text = ""
-        for s in spans:
-            if "мин" in s.get_text():
-                minutes_text = s.get_text()
+        time_span = None
+        for s in all_spans:
+            if "мин." in s.get_text():
+                time_span = s
                 break
-        
-        return {
-            "name": name, 
-            "minutes": underground_minutes_to_int(minutes_text)
-        }
-    except Exception:
-        return None
+
+        if not time_span:
+            underground_list.append({"name": name, "minutes": None, "type": "unknown"})
+            continue
+
+        minutes_raw = time_span.get_text(strip=True)
+        minutes = underground_minutes_to_int(minutes_raw)
+
+        transport_type = "пешком"
+        svg_icon = time_span.find("svg")
+        if svg_icon:
+            path_data = svg_icon.find("path")
+
+            if path_data and path_data.has_attr("clip-rule"):
+                transport_type = "транспорт"
+            elif svg_icon.find("g"):
+                transport_type = "пешком"
+
+        underground_list.append({
+            "name": name,
+            "minutes": minutes,
+            "type": transport_type
+        })
+    
+    return underground_list if underground_list else None
 
 
 async def parse_flat_page(page: Page, link: str, rooms: int) -> dict:
@@ -168,7 +183,7 @@ async def parse_flat_page(page: Page, link: str, rooms: int) -> dict:
         "repair": get_repair(soup),
         "year_built": get_year_built(soup),
         "building_type": get_building_type(soup),
-        "underground": get_underground(soup)
+        "underground": get_undergrounds(soup)
     }
 
     return result
