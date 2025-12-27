@@ -52,16 +52,29 @@ def get_floors(soup: BeautifulSoup) -> tuple[int | None, int | None]:
     return (None, None)
 
 
-def get_address(soup: BeautifulSoup) -> str | None:
+def get_address(soup: BeautifulSoup) -> dict | None:
     container = soup.find("div", {"data-name": "AddressContainer"})
     
     if not container:
         return None
     
-    address_text = container.get_text(separator="", strip=True)
-    clean_address = address_text.replace("На карте", "").replace(",", ", ").strip()
+    address_links = container.find_all("a")
     
-    return clean_address
+    if not address_links:
+        return None
+
+    parts = [link.get_text(strip=True) for link in address_links]
+    parts = [p for p in parts if p.lower() != "на карте"]
+
+    address_data = {
+        "full_address": ", ".join(parts),
+        "city": parts[0] if len(parts) > 0 else None,
+        "district": parts[1] if len(parts) > 1 else None,
+        "street": parts[-2] if len(parts) > 2 else None,
+        "house": parts[-1] if len(parts) > 0 else None,
+    }
+    
+    return address_data
 
 
 def get_repair(soup: BeautifulSoup) -> str | None:
@@ -115,7 +128,7 @@ def get_building_type(soup: BeautifulSoup) -> str | None:
     return None
 
 
-def get_undergrounds(soup: BeautifulSoup) -> list | None:
+def get_undergrounds(soup: BeautifulSoup) -> list[dict] | None:
     underground_list = []
     ul = soup.find("ul", {"data-name": "UndergroundList"})
     if not ul: return None
