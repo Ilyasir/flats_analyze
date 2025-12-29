@@ -75,15 +75,8 @@ async def main():
     async with async_playwright() as p:
         browser = await p.firefox.launch(headless=config.HEADLESS)
 
-        context_for_links = await browser.new_context(
-                user_agent=random.choice(config.USER_AGENTS))
-        page_for_links = await context_for_links.new_page()
-
         logger.info("Начинаю сбор ссылок...")
-        flats_data = await collect_main_flats_data(config.URLS, page_for_links)  # собрать ссылки на квартиры
-        
-        await page_for_links.close()
-        await context_for_links.close()
+        flats_data = await collect_main_flats_data(config.URLS, browser)  # собрать основную инфу о квартирах
 
         if not flats_data:
             logger.error("Ссылки не найдены!")

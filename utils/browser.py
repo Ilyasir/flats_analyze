@@ -19,53 +19,59 @@ async def block_heavy_resources(page: Page):
 
 
 async def collect_flats_main_data_from_url(
-        page: Page,
+        browser,
         url: str,
         rooms: int,
-        flats_main_data: list[tuple[str, int]]
-        ) -> None:
-    """Собирает основные данные (ссылки и количество комнат) по одной категории квартир."""
+        flats_main_data: list,
+        semaphore: asyncio.Semaphore
+    ):
+    """Собирает основные данные (ссылки) по квартирам с указанной страницы категории."""
+    async with semaphore:
+        context = await browser.new_context(
+                user_agent=random.choice(config.USER_AGENTS),
+                extra_http_headers=config.DEFAULT_HEADERS
+            )
+        page = await context.new_page()
+
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT)
+            
+            for page_num in range(config.MAX_PAGES_TO_PARSE):
+                cards = page.locator("article:has([data-mark='OfferTitle'])")
+                total_cards = await cards.count()
+                # Собирает ссылки с текущей страницы
+                for i in range(total_cards):
+                    card = cards.nth(i)
+                    link = await card.locator("a[href]").first.get_attribute("href")
+                    flats_main_data.append((link, rooms))
+
+                logger.info(f"Категория {url} стр. {page_num + 1} - квартир: {total_cards}")
+                # переход на следующую страницу, если есть, нажать кнопку "Дальше"
+                if page_num + 1 < config.MAX_PAGES_TO_PARSE:
+                    next_button = page.locator("nav[data-name='Pagination']").locator("a").filter(has_text="Дальше")
+                    if await next_button.count() > 0:
+                        await next_button.click()
+                        await page.wait_for_load_state("domcontentloaded")
+                        await asyncio.sleep(random.uniform(1.0, 2.0))
+                    else:
+                        break
+        finally:
+            logger.info(f"Завершен сбор квартир с категории {url}")
+            await context.close()
+
+
+async def collect_main_flats_data(urls_data: list[dict], browser) -> list[tuple[str, int]]:
+    """Проходит по всем категориям и собирает основные данные по квартирам."""
+    semaphore = asyncio.Semaphore(5)
+    flats_main_data = []
     
-    await page.goto(url, wait_until="domcontentloaded", timeout=config.PAGE_TIMEOUT)
-    # Проход по страницам категории
-    for page_num in range(config.MAX_PAGES_TO_PARSE):
-        # Собрать карточки квартир на текущей странице
-        cards = page.locator("article:has([data-mark='OfferTitle'])")
-        total_cards = await cards.count()
+    tasks = [
+        collect_flats_main_data_from_url(browser, item["url"], item["rooms"], flats_main_data, semaphore) 
+        for item in urls_data
+    ]
 
-        logger.info(f"Страница {page_num + 1}: ссылок на квартиры найдено: {total_cards}")
-        # Сбор ссылок с карточек
-        for i in range(total_cards):
-            card = cards.nth(i)
-            link = await card.locator("a[href]").first.get_attribute("href")
+    await asyncio.gather(*tasks)
 
-            flats_main_data.append((link, rooms))
-
-        # Переход к следующей странице, если она есть
-        if page_num + 1 < config.MAX_PAGES_TO_PARSE:
-            next_button = page.locator("nav[data-name='Pagination']").locator("a").filter(has_text="Дальше")
-
-            if await next_button.count() > 0:
-                await next_button.click()
-
-                await page.wait_for_load_state("domcontentloaded")
-                await asyncio.sleep(random.uniform(1.0, 2.0))  # небольшая пауза после клика
-            else:
-                logger.info("Кнопка 'Дальше' не найдена, перехожу к следующей категории.")
-                break
-
-
-async def collect_main_flats_data(urls_data: list[dict], page: Page) -> list[tuple[str, int]]:
-    """Собирает основные данные (ссылки и количество комнат) по всем категориям квартир."""
-    flats_main_data: list[tuple[str, int]] = []
-
-    for item in urls_data:
-        url = item["url"]
-        rooms = item["rooms"]
-
-        logger.info(f"Открываю категорию квартир по URL: {url}")
-        await collect_flats_main_data_from_url(page, url, rooms, flats_main_data)
-
-    unique_flats = list(set(flats_main_data)) # убрать дубликаты
-    logger.info(f"Сбор ссылок завершен. Всего уникальных ссылок: {len(unique_flats)}")
+    unique_flats = list(set(flats_main_data))
+    logger.info(f"Сбор завершен. Уникальных квартир: {len(unique_flats)}")
     return unique_flats
