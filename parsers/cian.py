@@ -1,5 +1,6 @@
 from bs4 import BeautifulSoup
 from playwright.async_api import Page
+from datetime import datetime
 from utils.normalize import ( 
     price_to_int,
     area_to_float,
@@ -219,13 +220,14 @@ async def parse_flat_page(page: Page, link: str, rooms: int) -> dict:
     floors_tuple = get_floors(soup)
     floor, floors_total = floors_tuple
 
-    # parsed_at = 
+    parsed_at = datetime.now().isoformat()
 
     result = {
         "link": link,
         "title": get_title(soup),
         "price": get_price(soup),
         "rooms": rooms,
+        "parsed_at": parsed_at,
         "total_area": get_total_area(soup),
         "living_area": get_living_area(soup),
         "address": get_address(soup),
