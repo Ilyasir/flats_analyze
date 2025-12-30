@@ -212,7 +212,7 @@ def get_undergrounds(soup: BeautifulSoup) -> list[dict] | None:
     return underground_list if underground_list else None
 
 
-async def parse_flat_page(page: Page, link: str, rooms: int) -> dict:
+async def parse_flat_page(page: Page, cian_id: int, link: str, rooms: int) -> dict:
     """Парсит страницу квартиры и возвращает словарь с данными."""
     content = await page.content()
     soup = BeautifulSoup(content, 'html.parser')
@@ -223,6 +223,7 @@ async def parse_flat_page(page: Page, link: str, rooms: int) -> dict:
     parsed_at = datetime.now().isoformat()
 
     result = {
+        "id": cian_id,
         "link": link,
         "title": get_title(soup),
         "price": get_price(soup),

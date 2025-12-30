@@ -1,8 +1,12 @@
 import asyncio
 import random
 from playwright.async_api import Page
-from core.logger import setup_logger
 from core import config
+from core.logger import setup_logger
+from utils.normalize import extract_cian_id
+from collections import namedtuple
+
+Flat_data = namedtuple("Flat_data", ["cian_id", "link", "rooms"])
 
 logger = setup_logger()
 
@@ -43,7 +47,10 @@ async def collect_flats_main_data_from_url(
                 for i in range(total_cards):
                     card = cards.nth(i)
                     link = await card.locator("a[href]").first.get_attribute("href")
-                    flats_main_data.append((link, rooms))
+                    cian_id = extract_cian_id(link)
+
+                    new_flat_data = Flat_data(cian_id=cian_id, link=link, rooms=rooms)
+                    flats_main_data.append(new_flat_data)
 
                 logger.info(f"Категория {url} стр. {page_num + 1} - квартир: {total_cards}")
                 # переход на следующую страницу, если есть, нажать кнопку "Дальше"
@@ -60,7 +67,7 @@ async def collect_flats_main_data_from_url(
             await context.close()
 
 
-async def collect_main_flats_data(urls_data: list[dict], browser) -> list[tuple[str, int]]:
+async def collect_main_flats_data(urls_data: list[dict], browser) -> list[Flat_data]:
     """Проходит по всем категориям и собирает основные данные по квартирам."""
     semaphore = asyncio.Semaphore(5)
     flats_main_data = []
@@ -72,6 +79,6 @@ async def collect_main_flats_data(urls_data: list[dict], browser) -> list[tuple[
 
     await asyncio.gather(*tasks)
 
-    unique_flats = list(set(flats_main_data))
-    logger.info(f"Сбор завершен. Уникальных квартир: {len(unique_flats)}")
-    return unique_flats
+    unique_flats_main_data = list(set(flats_main_data))
+    logger.info(f"Сбор завершен. Уникальных квартир: {len(unique_flats_main_data)}")
+    return unique_flats_main_data

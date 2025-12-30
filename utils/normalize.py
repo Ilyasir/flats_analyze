@@ -45,3 +45,16 @@ def floors_str_to_tuple(floors_str: str | None) -> tuple[int | None, int | None]
     # и если просто "5" без всех этажей
     digits = _extract_digits(text)
     return (int(digits), None) if digits else (None, None)
+
+
+def extract_cian_id(url: str) -> int | None:
+    """Извлекает ID из ссылки и возвращает его как целое число (int)."""
+    if not url:
+        return None
+    
+    match = re.search(r'/(\d{7,15})', url)
+    
+    if match:
+        return int(match.group(1))
+    
+    return None

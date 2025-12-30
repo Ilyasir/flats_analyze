@@ -12,9 +12,11 @@ logger = setup_logger()
 semaphore = asyncio.Semaphore(config.CONCURRENT_TASKS)
 
 
-async def scrape_flat_page(browser, link: str, rooms: int) -> dict | None:
+async def scrape_flat_page(browser, tuple_main_data) -> dict | None:
     """Парсит страницу квартиры и возвращает данные в виде словаря."""
     async with semaphore:
+        cian_id, link, rooms = tuple_main_data.cian_id, tuple_main_data.link, tuple_main_data.rooms
+
         context = await browser.new_context(
             user_agent=random.choice(config.USER_AGENTS),
             extra_http_headers=config.DEFAULT_HEADERS
@@ -32,7 +34,7 @@ async def scrape_flat_page(browser, link: str, rooms: int) -> dict | None:
                 return None
 
             flat = await asyncio.wait_for(
-                parse_flat_page(page, link, rooms),
+                parse_flat_page(page, cian_id, link, rooms),
                 timeout=15)
             
             # проверить наличие обязательных полей (цена и заголовок)
@@ -84,8 +86,8 @@ async def main():
             return 0
 
         tasks = [
-            scrape_flat_page(browser, link, rooms)
-            for link, rooms in flats_data
+            scrape_flat_page(browser, tuple_main_data)
+            for tuple_main_data in flats_data
         ]
 
         output_file = config.DATA_DIR / f"data_{int(time.time())}.jsonl"
