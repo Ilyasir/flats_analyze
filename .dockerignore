@@ -1,0 +1,13 @@
+init_db/
+data/
+**/__pycache__/
+*.pyc
+
+.git/
+.gitignore
+
+.venv/
+env/
+.env
+
+docker-compose.yml

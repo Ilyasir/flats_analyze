@@ -1,0 +1,16 @@
+services:
+  parser:
+    build: .
+    image: cian-parser:latest
+    container_name: cian_parser_worker
+    shm_size: '2gb'
+    volumes:
+      - ./data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 6.0G
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - TZ=Europe/Moscow

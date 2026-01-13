@@ -1,7 +1,7 @@
 from bs4 import BeautifulSoup
 from playwright.async_api import Page
 from datetime import datetime
-from utils.normalize import ( 
+from parser.utils.normalize import ( 
     price_to_int,
     area_to_float,
     underground_minutes_to_int,
@@ -95,7 +95,7 @@ def get_address(soup: BeautifulSoup) -> dict | None:
         "full_address": ", ".join(parts),
         "city": parts[0] if len(parts) > 0 else None,
         "okrug": cleaned_okrug,
-        "district": parts[2] if len(parts) > 2 else None,
+        "district": parts[2] if len(parts) > 4 else None,
         "street": parts[-2] if len(parts) > 1 else None,
         "house": parts[-1] if len(parts) > 0 else None,
     }
@@ -225,21 +225,21 @@ async def parse_flat_page(page: Page, cian_id: int, link: str, rooms: int) -> di
     result = {
         "id": cian_id,
         "link": link,
-        "title": get_title(soup),
         "price": get_price(soup),
         "rooms": rooms,
-        "parsed_at": parsed_at,
+        "title": get_title(soup),
+        "created_at": parsed_at,
         "total_area": get_total_area(soup),
         "living_area": get_living_area(soup),
-        "address": get_address(soup),
         "floor": floor,
         "floors_total": floors_total,
         "description": get_description(soup),
         "repair": get_repair(soup),
+        "building_type": get_building_type(soup),
         "year_built": get_year_built(soup),
         "ceiling_height": get_ceiling_height(soup),
-        "building_type": get_building_type(soup),
-        "underground": get_undergrounds(soup)
+        "address": get_address(soup),
+        "metro": get_undergrounds(soup)
     }
 
     return result
