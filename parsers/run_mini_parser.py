@@ -1,3 +1,4 @@
+import os
 import asyncio
 import random
 import time
@@ -13,7 +14,7 @@ from parser.core.logger import setup_logger
 logger = setup_logger()
 
 
-async def collect_flats_from_url(browser, flat_ids: set, url: str):
+async def collect_flats_from_url(browser, flat_ids: set, url: str, filename):
     context = await browser.new_context(
         user_agent=random.choice(config_parser.USER_AGENTS),
         extra_http_headers=config_parser.DEFAULT_HEADERS
@@ -25,13 +26,13 @@ async def collect_flats_from_url(browser, flat_ids: set, url: str):
         await page.goto(url, wait_until="domcontentloaded", timeout=20000)
         
         for page_num in range(60):
-            logger.info(f"🔎 Обрабатываю страницу {page_num + 1}. URL: {url} ")
-
             content = await page.content()
             soup = BeautifulSoup(content, 'html.parser')
             
             cards = soup.find_all("article", {"data-name": "CardComponent"}) 
+            cards_count = len(cards)
 
+            logger.info(f"🔎 Обрабатываю страницу {page_num + 1}. Квартир - {cards_count} \nURL: {url} ")
             for card in cards:
                 try:
                     link_el = card.find("a", href=True)
@@ -67,9 +68,6 @@ async def collect_flats_from_url(browser, flat_ids: set, url: str):
                         "parsed_at": datetime.now().isoformat()
                     }
 
-                    date_str = datetime.now().strftime("%Y-%m-%d")
-                    filename = f"data/flats_{date_str}.jsonl"
-
                     await save_to_jsonl(flat_data, filename)
                     flat_ids.add(cian_id)
 
@@ -81,7 +79,7 @@ async def collect_flats_from_url(browser, flat_ids: set, url: str):
                 try:
                     next_button = page.locator("nav[data-name='Pagination'] a").filter(has_text="Дальше")
                     if await next_button.count() > 0:
-                        await next_button.click(force=True, timeout=5000)
+                        await next_button.click()
                         await page.wait_for_load_state("domcontentloaded")
                         await asyncio.sleep(random.uniform(1.5, 2.5))
                     else:
@@ -109,6 +107,15 @@ async def main():
         semaphore = asyncio.Semaphore(3)
         flat_ids = set()
 
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+        final_local = f"data/flats_{date_str}.jsonl"
+        temp_local = f"data/flats_{date_str}_temp.jsonl"
+
+        # Очищаем временный файл перед стартом
+        if os.path.exists(temp_local):
+            os.remove(temp_local)
+
         async def sem_task(url):
             async with semaphore:
                 # задержка между стартами потоков
@@ -116,12 +123,16 @@ async def main():
                 return await collect_flats_from_url(
                     browser,
                     flat_ids, 
-                    url
+                    url,
+                    temp_local
                 )
 
         tasks = [sem_task(u) for u in config_parser.URLS]
-
         await asyncio.gather(*tasks, return_exceptions=True)
+
+        if os.path.exists(temp_local):
+            os.replace(temp_local, final_local)
+            logger.info(f"Данные обновлены в {final_local}")
 
         await browser.close()
         return len(flat_ids)

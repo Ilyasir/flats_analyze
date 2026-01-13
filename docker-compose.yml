@@ -9,7 +9,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 6.0G
+          memory: 4.0G
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
