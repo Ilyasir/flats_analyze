@@ -74,7 +74,7 @@ with DAG(
         task_id='run_flats_parser',
         image='flats-parser:1.0',
         api_version='auto',
-        auto_remove=True,
+        auto_remove='success',
         docker_url="unix://var/run/docker.sock",
         network_mode="flats_analyze_default",
         tty=True,
