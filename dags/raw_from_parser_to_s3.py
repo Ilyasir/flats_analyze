@@ -1,42 +1,41 @@
 import logging
 import pendulum
 from airflow import DAG
-from airflow.models import Variable
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.providers.docker.operators.docker import DockerOperator
 from airflow.operators.python import PythonOperator
 from airflow.operators.empty import EmptyOperator
 from airflow.exceptions import AirflowFailException
 
-# Конфигурация DAG
 OWNER = "ilyas"
 DAG_ID = "raw_from_parser_to_s3"
 
-# S3
-ACCESS_KEY = Variable.get("access_key")
-SECRET_KEY = Variable.get("secret_key")
+LAYER = "raw"
+SOURCE = "cian"
 
-LONG_DESCRIPTION = """
-# LONG DESCRIPTION
-"""
-
-SHORT_DESCRIPTION = "Запуск парсера в Docker контейнере и сохранение в S3"
+SHORT_DESCRIPTION = "DAG запускает контейнер парсера для сбора объявлений о квартирах и сохраняет результат в S3 в формате .jsonl"
 
 default_args = {
     'owner': OWNER,
     "start_date": pendulum.datetime(2026, 1, 18, tz="Europe/Moscow"),
-    'retries': 3,
+    'retries': 2,
     "retry_delay": pendulum.duration(hours=1),
 }
 
-def check_file_in_s3(data_interval_start):
-    dt = data_interval_start.in_timezone('Europe/Moscow')
+
+def get_s3_key(source, dt) -> str:
     year = dt.year
     month = dt.strftime('%m')
     day = dt.strftime('%d')
     
-    s3_key = f"cian/year={year}/month={month}/day={day}/flats.jsonl"
-    bucket_name = 'raw-data'
+    return f"{source}/year={year}/month={month}/day={day}/flats.jsonl"
+
+
+def check_file_in_s3(data_interval_start):
+    dt = data_interval_start.in_timezone('Europe/Moscow')
+
+    s3_key = get_s3_key(SOURCE, dt)
+    bucket_name = LAYER
     
     hook = S3Hook(aws_conn_id='s3_conn')
     
@@ -64,7 +63,6 @@ with DAG(
     tags=["s3", "raw"],
     description=SHORT_DESCRIPTION,
 ) as dag:
-    dag.doc_md = LONG_DESCRIPTION
 
     start = EmptyOperator(
         task_id="start",
@@ -81,10 +79,10 @@ with DAG(
         mem_limit='4g',
         shm_size='2g',
         environment={
-            'MINIO_ACCESS_KEY': ACCESS_KEY,
-            'MINIO_SECRET_KEY': SECRET_KEY,
-            'S3_ENDPOINT': 'http://minio:9000',
-            'MINIO_BUCKET_NAME': 'raw-data',
+            'MINIO_ACCESS_KEY': "{{ conn.s3_conn.login }}", # login из Connections
+            'MINIO_SECRET_KEY': "{{ conn.s3_conn.password }}", # password из Connections
+            'MINIO_ENDPOINT_URL': 'http://minio:9000',
+            'MINIO_BUCKET_NAME': LAYER,
             'TZ': 'Europe/Moscow',
             'EXECUTION_DATE': "{{ data_interval_start.in_timezone('Europe/Moscow').format('YYYY-MM-DD') }}",
         }
