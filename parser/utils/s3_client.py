@@ -3,7 +3,7 @@ import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
-from parser.core.logger import setup_logger
+from core.logger import setup_logger
 
 logger = setup_logger()
 load_dotenv()

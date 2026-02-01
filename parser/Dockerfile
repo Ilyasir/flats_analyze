@@ -5,7 +5,7 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-COPY parsers/requirements.txt .
+COPY parser/requirements.txt .
 
 RUN apt-get update && \
     pip install --no-cache-dir -r requirements.txt && \
@@ -16,8 +16,8 @@ RUN apt-get update && \
     rm -rf /root/.cache/ms-playwright/firefox-* && \
     rm -rf /root/.cache/ms-playwright/webkit-*
 
-COPY parsers/ ./parsers/
+COPY parser/ ./parser/
 
-ENV PYTHONPATH=/app/parsers
+ENV PYTHONPATH=/app/parser
 
-CMD ["python", "parsers/run_mini_parser.py"]
+CMD ["python", "parser/run_parser.py"]
