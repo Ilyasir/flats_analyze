@@ -1,11 +1,10 @@
 import logging
-import duckdb
 import pendulum
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.empty import EmptyOperator
-from airflow.hooks.base import BaseHook
 from airflow.sensors.external_task import ExternalTaskSensor
+from utils.duckdb import get_duckdb_s3_connection
 
 OWNER = "ilyas"
 DAG_ID = "silver_from_s3_to_s3"
@@ -13,7 +12,7 @@ DAG_ID = "silver_from_s3_to_s3"
 LAYER_SOURCE = "raw"
 LAYER_TARGET = "silver"
 
-SHORT_DESCRIPTION = "Трансформация сырых JSONL данных в типизированный Parquet с помощью DuckDB и сохранение в S3"
+SHORT_DESCRIPTION = "DAG для трансформации данных из слоя raw в слой silver, из jsonl в типизированный parquet и сохранение в S3"
 
 default_args = {
     'owner': OWNER,
@@ -23,39 +22,19 @@ default_args = {
 }
 
 
-def get_and_transform_raw_data_to_silver_s3(**context) -> dict[str, int | float]:
-    s3_conn = BaseHook.get_connection("s3_conn")
-    # параметры подключения
-    access_key = s3_conn.login
-    secret_key = s3_conn.password
-    s3_endpoint = s3_conn.extra_dejson.get("endpoint_url")
-
-    # полные пути для duckdb
+def get_and_transform_raw_data_to_silver_s3(**context) -> dict[str, int]:
+    # Формируем путь к файлу в S3
     dt = context["data_interval_start"].in_timezone('Europe/Moscow')
-    year = dt.year
-    month = dt.strftime('%m')
-    day = dt.strftime('%d')
+    raw_s3_key = f"s3://{LAYER_SOURCE}/cian/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/flats.jsonl"
+    silver_s3_key = f"s3://{LAYER_TARGET}/cian/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/flats.parquet"
 
-    raw_s3_path = f"s3://{LAYER_SOURCE}/cian/year={year}/month={month}/day={day}/flats.jsonl"
-    silver_s3_path = f"s3://{LAYER_TARGET}/cian/year={year}/month={month}/day={day}/flats.parquet"
+    con = get_duckdb_s3_connection("s3_conn")
 
-    con = duckdb.connect()
-    con.execute(
-        f"""
-        INSTALL httpfs; -- расширение для работы с S3/HTTP
-        LOAD httpfs;
-        SET s3_url_style = 'path';
-        SET s3_endpoint = '{s3_endpoint.replace("http://", "")}'; -- duckdb сам подставляет http://
-        SET s3_access_key_id = '{access_key}';
-        SET s3_secret_access_key = '{secret_key}';
-        SET s3_use_ssl = FALSE;
-        """
-    )
-
-    raw_count: int = con.execute(f"SELECT count(*) FROM read_json_auto('{raw_s3_path}')").fetchone()[0]
+    raw_count: int = con.execute(f"SELECT count(*) FROM read_json_auto('{raw_s3_key}')").fetchone()[0]
     logging.info(f"📊 Входящие данные (raw): {raw_count} строк.")
 
-    logging.info(f"💻 Выполняю трансформацию: {raw_s3_path}")
+    logging.info(f"💻 Выполняю трансформацию: {raw_s3_key}")
+    # основной ETL
     con.execute(
         f"""
         COPY(
@@ -64,6 +43,7 @@ def get_and_transform_raw_data_to_silver_s3(**context) -> dict[str, int | float]
                 id::BIGINT as id,
                 link::TEXT as link,
                 title::VARCHAR as title,
+                -- тип жилья
                 CASE
                     WHEN title ILIKE '%апартаменты%' THEN TRUE
                     ELSE FALSE
@@ -107,7 +87,7 @@ def get_and_transform_raw_data_to_silver_s3(**context) -> dict[str, int | float]
                 description::TEXT as description,
                 -- нормализованный адрес, ток для дедубликации
                 lower(regexp_replace(address, '[^а-яА-Я0-9]', '', 'g')) as norm_address
-            FROM read_json_auto('{raw_s3_path}')
+            FROM read_json_auto('{raw_s3_key}')
         ),
         -- дедубликация по бизнес ключу (чистый адрес, этажи, кол-во комнат)
         deduplicated AS (
@@ -124,19 +104,18 @@ def get_and_transform_raw_data_to_silver_s3(**context) -> dict[str, int | float]
         -- сохраняем в Parquet, убирая не нужные колонки
         SELECT * EXCLUDE (row_num, norm_address)
         FROM deduplicated
-        WHERE row_num = 1 ) TO '{silver_s3_path}' (FORMAT PARQUET);
+        WHERE row_num = 1 ) TO '{silver_s3_key}' (FORMAT PARQUET);
         """
     )
     
-    silver_count: int = con.execute(f"SELECT count(*) FROM read_parquet('{silver_s3_path}')").fetchone()[0]
+    silver_count: int = con.execute(f"SELECT count(*) FROM read_parquet('{silver_s3_key}')").fetchone()[0]
     logging.info(f"Данные после дедубликации (silver): {silver_count} строк.")
     
-    diff: int = raw_count - silver_count
-    logging.info(f"Удалено дублей и мусора: {diff} строк ({(diff/raw_count)*100:.2f}%).")
-
     con.close()
 
-    logging.info(f"✅ Файл успешно сохранен: {silver_s3_path}")
+    diff: int = raw_count - silver_count # сколько строк удалилось в процессе трансформации
+    logging.info(f"Удалено дублей и мусора: {diff} строк ({(diff/raw_count)*100:.2f}%).")
+    logging.info(f"✅ Файл успешно сохранен: {silver_s3_key}")
     return {"raw_count": raw_count, "silver_count": silver_count, "removed": diff}
 
 
@@ -158,7 +137,7 @@ with DAG(
         task_id="sensor_on_raw_layer",
         external_dag_id="raw_from_parser_to_s3",
         allowed_states=["success"],
-        mode="reschedule",
+        mode="reschedule", # чтобы не занимать воркер во время ожидания
         timeout=36000,  # длительность работы сенсора
         poke_interval=60  # частота проверки
     )
