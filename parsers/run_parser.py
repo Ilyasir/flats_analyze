@@ -37,7 +37,7 @@ async def collect_flats_from_url(browser, flat_ids: set, url: str, filename: str
     for page_num in range(config_parser.MAX_PAGES_TO_PARSE):
         # получаем html страницы и парсим его через bs4
         content = await page.content()
-        soup = BeautifulSoup(content, 'html.parser')
+        soup = BeautifulSoup(content, 'lxml')
 
         # находим все карточки с квартирами на странице
         cards = soup.find_all("article", {"data-name": "CardComponent"}) 
@@ -124,7 +124,7 @@ async def main():
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-gpu",
-                "--disable-dev-shm-usage=true", 
+                "--disable-http-cache"
             ]
         )
         # ограничиваем колво одновременно открытых вкладок, чтобы не забанили
