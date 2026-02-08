@@ -4,17 +4,6 @@ import re
 from playwright.async_api import Page
 
 
-async def block_heavy_resources(page: Page):
-    """Отключает загрузку тяжелых ресурсов(картинок и стилей) для экономии трафика и скорости."""
-    def route_handler(route):
-
-        if route.request.resource_type in ["image", "font", "media"]:
-            return route.abort()
-        return route.continue_()
-
-    await page.route("**/*", route_handler)
-
-
 async def click_next_page(page, selector: str, wait_range=(1.5, 2.5)) -> bool:
     """Пытается найти кнопку пагинации и кликнуть по ней"""
     try:
@@ -27,6 +16,32 @@ async def click_next_page(page, selector: str, wait_range=(1.5, 2.5)) -> bool:
         return False
     except Exception:
         return False
+
+
+async def block_heavy_resources(page: Page):
+    """Отключает загрузку тяжелых ресурсов(картинок, рекламы, аналитики)"""
+    blacklisted_domains = [
+        "google-analytics.com",
+        "googletagmanager.com",
+        "yandex.ru/metrika",
+        "mc.yandex.ru",
+        "facebook.net",
+        "ads",
+        "pda.cian.ru/dev/metrics"
+    ]
+
+    def route_handler(route):
+        url = route.request.url.lower()
+        resource_type = route.request.resource_type
+
+        if resource_type in ["image", "font", "media", "manifest", "object"]:
+            return route.abort()
+
+        if any(domain in url for domain in blacklisted_domains):
+            return route.abort()
+        return route.continue_()
+
+    await page.route("**/*", route_handler)
     
 
 def extract_cian_id(url: str) -> int | None:
