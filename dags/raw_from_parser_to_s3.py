@@ -91,16 +91,17 @@ with DAG(
     )
 
     run_parser = DockerOperator(
-        task_id='run_flats_parser',
+        task_id='run_parser',
         image='flats-parser:2.0',
+        container_name='flats_parser_container',
         api_version='auto',
-        auto_remove='success',
+        auto_remove='force',
         docker_url="unix://var/run/docker.sock",# используем докер на хосте аирфлоу
         network_mode="flats_analyze_default",
         mount_tmp_dir=False,
         tty=True, # логи контейнера видны в логах аирфлоу
         mem_limit='4g', # ограничение по памяти для контейнера
-        shm_size='2g',
+        shm_size='1g', # для хрома внутри контейнера, чтобы не было ошибок с памятью при парсинге
         # параметры доступа к S3 через переменные окружения, чтобы внутри контейнера можно было сохранять в S3 
         environment={
             'MINIO_ACCESS_KEY': "{{ conn.s3_conn.login }}",
