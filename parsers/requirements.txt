@@ -6,6 +6,7 @@ greenlet==3.3.0
 jmespath==1.0.1
 lxml==5.4.0
 playwright==1.57.0
+playwright-stealth==2.0.1
 pyee==13.0.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.1

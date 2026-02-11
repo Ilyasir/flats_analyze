@@ -4,24 +4,26 @@ import random
 import time
 from datetime import datetime
 
+import aiofiles
 from bs4 import BeautifulSoup
 from parser.core import config_parser
 from parser.core.logger import setup_logger
 from parser.utils.browser import block_heavy_resources, click_next_page, extract_cian_id
-from parser.utils.files import save_to_jsonl
+from parser.utils.files import save_to_file_object
 from parser.utils.s3_client import upload_file_to_s3
 from playwright.async_api import async_playwright
+from playwright_stealth import Stealth
 
 logger = setup_logger()
 
 
-async def collect_flats_from_url(browser, flat_ids: set, url: str, filename: str) -> None:
+async def collect_flats_from_url(browser, flat_ids: set, url: str, file_obj: str) -> None:
     """Собирает данные о квартирах с одного URL и сохраняет их в jsonl файл
     Параметры:
     - browser: экземпляр браузера Playwright
     - flat_ids: множество уже собранных id квартир для избежания дубликатов
     - url: URL страницы для парсинга
-    - filename: имя файла для сохранения результатов"""
+    - file_obj: обьект файла для сохранения результатов"""
     context = await browser.new_context(
         user_agent=random.choice(config_parser.USER_AGENTS), extra_http_headers=config_parser.DEFAULT_HEADERS
     )
@@ -88,7 +90,7 @@ async def collect_flats_from_url(browser, flat_ids: set, url: str, filename: str
                 }
 
                 # сохраняем в файл и добавляем id в множество
-                await save_to_jsonl(flat_data, filename)
+                await save_to_file_object(flat_data, file_obj)
                 flat_ids.add(cian_id)
 
             except Exception as e:
@@ -101,6 +103,7 @@ async def collect_flats_from_url(browser, flat_ids: set, url: str, filename: str
                 logger.warning(f"⚠️ Не нашел кнопку 'Дальше' на странице {page_num + 1}")
                 break
 
+    await page.close()
     logger.info(f"✅ Завершен сбор с URL: {url}")
     await context.close()  # когда спарчили URL, закрываем вкладку браузера
 
@@ -116,7 +119,7 @@ async def main():
         start_time_dt = datetime.now()
         logger.info(f"Дата из Airflow не передана, использую текущую: {start_time_dt.strftime('%Y-%m-%d')}")
 
-    async with async_playwright() as p:
+    async with Stealth().use_async(async_playwright()) as p:
         start_time = time.time()  # для измерения времени парсинга
         browser = await p.chromium.launch(
             headless=config_parser.HEADLESS,
@@ -133,16 +136,18 @@ async def main():
 
         if os.path.exists(temp_local):
             os.remove(temp_local)
+        # парсим все URL из конфига, результаты сохраняем во временный файл
+        async with aiofiles.open(temp_local, mode="a", encoding="utf-8") as f:
 
-        async def sem_task(url):
-            async with semaphore:
-                # рандом задержка перед началом парсинга каждого URL
-                await asyncio.sleep(random.uniform(2, 5))
-                return await collect_flats_from_url(browser, flat_ids, url, temp_local)
+            async def sem_task(url):
+                async with semaphore:
+                    # рандом задержка перед началом парсинга каждого URL
+                    await asyncio.sleep(random.uniform(2, 5))
+                    return await collect_flats_from_url(browser, flat_ids, url, f)
 
-        # запускаем парсинг по всем URL параллельно, но с ограничением по семафору
-        tasks = [sem_task(u) for u in config_parser.URLS]
-        await asyncio.gather(*tasks, return_exceptions=True)
+            # запускаем парсинг по всем URL параллельно, но с ограничением по семафору
+            tasks = [sem_task(u) for u in config_parser.URLS]
+            await asyncio.gather(*tasks, return_exceptions=True)
 
         await browser.close()
         logger.info(f"✅ Парсинг завершен. Спарсено {len(flat_ids)} квартир за {round(time.time() - start_time)} сек.")
