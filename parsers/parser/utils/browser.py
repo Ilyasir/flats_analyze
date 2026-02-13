@@ -5,14 +5,14 @@ import re
 from playwright.async_api import Page
 
 
-async def click_next_page(page, selector: str, wait_range=(1.5, 2.5)) -> bool:
+async def click_next_page(page: Page, selector: str, wait_range=(1.5, 2.5)) -> bool:
     """Пытается найти кнопку пагинации и кликнуть по ней"""
     try:
         next_button = page.locator(selector).filter(has_text="Дальше")
-        if await next_button.count() > 0:
+        if await next_button.count() > 0:  # если кнопка найдена
             await next_button.click()
             await page.wait_for_load_state("domcontentloaded")
-            await asyncio.sleep(random.uniform(*wait_range))
+            await asyncio.sleep(random.uniform(*wait_range))  # ждем случайное время после клика
             return True
         return False
     except Exception:
@@ -46,7 +46,7 @@ async def block_heavy_resources(page: Page):
 
 
 def extract_cian_id(url: str) -> int | None:
-    """Извлекает ID из ссылки и возвращает его как целое число (int)."""
+    """Извлекает регуляркой id из ссылки на обьявление"""
     if not url:
         return None
     match = re.search(r"/(\d{7,15})", url)

@@ -20,7 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     rm -rf /var/lib/apt/lists/*
 
 COPY parsers/ ./parsers/
-
+# tini для управления процессами внутри контейнера (чтобы не было зомби-процессов при завершении)
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 CMD ["python", "parsers/run_parser.py"]

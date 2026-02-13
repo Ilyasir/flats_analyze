@@ -17,6 +17,8 @@ class RelativeTimeFormatter(logging.Formatter):
 
 
 def setup_logger():
+    """Кастомный логгер с форматом времени от начала времени работы парсера
+    (чтобы в логах было видно, сколько времени уже парсится)"""
     logger = logging.getLogger("rentcheck")
     if logger.handlers:
         return logger

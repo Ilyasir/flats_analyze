@@ -3,22 +3,25 @@
 
 .git/
 .gitignore
+.github/
 
 .venv/
 env/
 .env
+
+.ruff_cache/
 
 .vscode/
 .idea/
 
 Dockerfile  
 docker-compose.yml
-
-data/
+.dockerignore
 
 logs/
 config/
 plugins/
 dags/
 
+data/
 minio_data/

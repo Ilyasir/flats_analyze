@@ -3,11 +3,9 @@ import os
 import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
-from dotenv import load_dotenv
 from parser.core.logger import setup_logger
 
 logger = setup_logger()
-load_dotenv()
 
 ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
 SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
@@ -35,5 +33,5 @@ def upload_file_to_s3(file_path: str, object_name: str) -> bool:
         s3_client.upload_file(file_path, BUCKET_NAME, object_name)
         return True
     except Exception as e:
-        logger.info(f"Ошибка загрузки {file_path} в S3: {e}")
+        logger.error(f"Ошибка загрузки {file_path} в S3: {e}")
         return False

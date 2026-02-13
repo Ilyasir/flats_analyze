@@ -4,7 +4,7 @@
 *.log
 **/__pycache__/
 *.pyc
-
+tree.py
 .vscode/
 .idea/
 
