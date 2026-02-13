@@ -2,6 +2,7 @@ import logging
 
 import pendulum
 from airflow import DAG
+from airflow.exceptions import AirflowFailException
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
 from utils.datasets import RAW_DATASET_CIAN_FLATS, SILVER_DATASET_CIAN_FLATS
@@ -14,7 +15,7 @@ LAYER_SOURCE = "raw"
 LAYER_TARGET = "silver"
 
 SHORT_DESCRIPTION = (
-    "DAG для трансформации данных из слоя raw в слой silver, из jsonl втипизированный parquet и сохранение в S3"
+    "DAG для трансформации данных из слоя raw в слой silver, из jsonl в типизированный parquet и сохранение в S3"
 )
 
 default_args = {
@@ -26,7 +27,7 @@ default_args = {
 
 
 def get_and_transform_raw_data_to_silver_s3(**context) -> dict[str, int]:
-    """Очистка, дедубликация данных из слоя raw в parquet и сохранение в S3"""
+    """Очистка, дедубликация данных из слоя raw в silver .parquet и сохранение в S3"""
     dt = context["data_interval_start"].in_timezone("Europe/Moscow")
     raw_s3_key = (
         f"s3://{LAYER_SOURCE}/cian/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/flats.jsonl"
@@ -37,13 +38,7 @@ def get_and_transform_raw_data_to_silver_s3(**context) -> dict[str, int]:
 
     con = get_duckdb_s3_connection("s3_conn")
 
-    raw_count: int = con.execute(f"SELECT count(*) FROM read_json_auto('{raw_s3_key}')").fetchone()[0]
-    logging.info(f"📊 Входящие данные (raw): {raw_count} строк.")
-
-    logging.info(f"💻 Выполняю трансформацию: {raw_s3_key}")
-    # основной ETL
-    con.execute(
-        f"""
+    raw_to_silver_query = f"""
         COPY(
         WITH raw_transformed AS (
             SELECT
@@ -61,11 +56,16 @@ def get_and_transform_raw_data_to_silver_s3(**context) -> dict[str, int]:
                     ELSE FALSE
                 END as is_studio,
                 -- площадь из заголовка, число перед м², запятую на точку поменяем
-                replace(NULLIF(regexp_extract(title, '(\d+[.,]?\d*)\s*м²', 1), ''), ',', '.')::NUMERIC(10, 2) as area,
-                -- комнатность (0 для студий и своб. планировок)
+                replace(
+                    regexp_replace(
+                        NULLIF(regexp_extract(title, '([\d\s]+[.,]?\d*)\s*м²', 1), ''),
+                        '\s+', '', 'g'
+                    ), 
+                    ',', '.'
+                )::NUMERIC(10, 2) AS area,
+                -- комнатность (0 для студий)
                 CASE 
                     WHEN title ILIKE '%студия%' THEN 0
-                    WHEN title ILIKE '%своб%' THEN 0
                     ELSE NULLIF(regexp_extract(title, '^(\d+)', 1), '')::INT
                 END as rooms_count,
                 -- этажи
@@ -113,23 +113,80 @@ def get_and_transform_raw_data_to_silver_s3(**context) -> dict[str, int]:
                 AND price IS NOT NULL
                 AND okrug IS NOT NULL
                 AND (district IS NOT NULL OR is_new_moscow) -- у новой москвы может не быть райнов
+                AND round(price / area) > 50000 -- выкидываем фейки (врятли цена за метр хаты меньше 50к)
         )
         -- сохраняем в parquet, EXLUDE убирает ненужные колонки
         SELECT * EXCLUDE (row_num, norm_address)
         FROM deduplicated
         WHERE row_num = 1) TO '{silver_s3_key}' (FORMAT PARQUET, OVERWRITE TRUE);
-        """
-    )
+    """
 
-    silver_count: int = con.execute(f"SELECT count(*) FROM read_parquet('{silver_s3_key}')").fetchone()[0]
-    logging.info(f"Данные после дедубликации (silver): {silver_count} строк.")
+    try:
+        logging.info(f"💻 Выполняю трансформацию: {raw_s3_key}")
+        con.execute(raw_to_silver_query)
 
-    con.close()
+    finally:
+        con.close()
 
-    diff: int = raw_count - silver_count  # сколько строк удалилось в процессе трансформации
-    logging.info(f"Удалено дублей и мусора: {diff} строк ({(diff / raw_count) * 100:.2f}%).")
     logging.info(f"✅ Файл успешно сохранен: {silver_s3_key}")
-    return {"raw_count": raw_count, "silver_count": silver_count, "removed": diff}
+
+    return {  # автопуш ключей в xcoms
+        "raw_s3_key": raw_s3_key,
+        "silver_s3_key": silver_s3_key,
+    }
+
+
+def check_silver_data_quality(**context):
+    """Проверка качества данных в silver слое после трансформации"""
+    # вытаскиваем словарик ключей из xcoms
+    keys = context["ti"].xcom_pull(task_ids="transform_to_silver")
+    raw_s3_key = keys["raw_s3_key"]
+    silver_s3_key = keys["silver_s3_key"]
+
+    con = get_duckdb_s3_connection("s3_conn")
+
+    try:
+        logging.info("💻 Выполняю проверку данных")
+
+        dq_stats: tuple[int, int, float, float] = con.execute(
+            f"""
+                SELECT
+                    COUNT(*) as total_rows,
+                    COUNT(distinct district) as all_districts,
+                    MIN(area) as min_area,
+                    MAX(area) as max_area
+                FROM read_parquet('{silver_s3_key}')
+            """
+        ).fetchone()
+
+        raw_total_rows: int = con.execute(f"SELECT count(*) FROM read_json_auto('{raw_s3_key}')").fetchone()[0]
+    finally:
+        con.close()
+
+    silver_total_rows, districts, min_area, max_area = dq_stats
+    diff: int = raw_total_rows - silver_total_rows  # сколько строк удалилось в процессе трансформации
+    percent_removed: float = (diff / raw_total_rows) * 100
+    # проверки
+    if silver_total_rows == 0:
+        raise AirflowFailException("Файл пустой!")
+
+    if percent_removed > 50:
+        logging.error(f"❌ Удалено {percent_removed:.2f}% данных после трансформации.")
+        raise AirflowFailException("Слишком много данных удалено!")
+
+    if districts > 125:
+        logging.warning(f"⚠️ Много уникальных районов - {districts}")
+
+    if min_area < 5:
+        logging.warning(f"⚠️ Слишком маленькая площадь: {min_area} м²")
+
+    if max_area > 1500:
+        logging.warning(f"⚠️ Подозрительно большая площадь: {max_area} м²")
+
+    logging.info("✅ Проверка пройдена")
+    logging.info(f"Удалено дублей и мусора: {diff} строк ({percent_removed:.2f}%).")
+
+    return {"raw_count": raw_total_rows, "silver_count": silver_total_rows, "removed": diff}
 
 
 with DAG(
@@ -150,9 +207,14 @@ with DAG(
         python_callable=get_and_transform_raw_data_to_silver_s3,
     )
 
+    check_data_quality = PythonOperator(
+        task_id="check_data_quality",
+        python_callable=check_silver_data_quality,
+    )
+
     end = EmptyOperator(
         task_id="end",
         outlets=[SILVER_DATASET_CIAN_FLATS],
     )
 
-    start >> transform_to_silver >> end
+    start >> transform_to_silver >> check_data_quality >> end

@@ -28,25 +28,28 @@ def check_raw_data_quality(**context) -> dict[str, int]:
     """Проверка качества данных в S3 с помощью duckdb"""
     # Формируем путь к файлу в S3
     dt = context["data_interval_start"].in_timezone("Europe/Moscow")
-    s3_key = f"s3://{LAYER}/cian/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/flats.jsonl"
+    raw_s3_key = f"s3://{LAYER}/cian/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/flats.jsonl"
 
     con = get_duckdb_s3_connection("s3_conn")
 
-    logging.info("💻 Выполняю проверку данных")
-    data_quality_results: tuple[int, int, int, int, int] = con.execute(
-        f"""
-            SELECT
-                COUNT(*) as total_rows,
-                COUNT(DISTINCT id) as unique_ids,
-                COUNT(price) FILTER (WHERE price IS NOT NULL AND price != '') as valid_prices,
-                COUNT(address) FILTER (WHERE address IS NOT NULL AND address != '') as valid_addresses,
-                COUNT(metro) FILTER (WHERE metro IS NOT NULL AND metro != '') as valid_metro
-            FROM read_json_auto('{s3_key}')
-        """
-    ).fetchone()
-    con.close()
-    # распаковка результатов
-    total_rows, unique_ids, valid_prices, valid_addresses, valid_metro = data_quality_results
+    try:
+        logging.info("💻 Выполняю проверку данных")
+        dq_stats: tuple[int, int, int, int, int] = con.execute(
+            f"""
+                SELECT
+                    COUNT(*) as total_rows,
+                    COUNT(DISTINCT id) as unique_ids,
+                    COUNT(price) FILTER (WHERE price IS NOT NULL AND price != '') as valid_prices,
+                    COUNT(address) FILTER (WHERE address IS NOT NULL AND address != '') as valid_addresses,
+                    COUNT(metro) FILTER (WHERE metro IS NOT NULL AND metro != '') as valid_metro
+                FROM read_json_auto('{raw_s3_key}')
+            """
+        ).fetchone()
+
+    finally:
+        con.close()
+
+    total_rows, unique_ids, valid_prices, valid_addresses, valid_metro = dq_stats
 
     if total_rows == 0:
         raise AirflowFailException("Файл пустой!")
