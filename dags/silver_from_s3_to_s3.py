@@ -112,6 +112,7 @@ def get_and_transform_raw_data_to_silver_s3(**context) -> dict[str, int]:
             WHERE area IS NOT NULL -- выкидываем строки с битыми данными
                 AND price IS NOT NULL
                 AND okrug IS NOT NULL
+                AND rooms_count IS NOT NULL
                 AND (district IS NOT NULL OR is_new_moscow) -- у новой москвы может не быть райнов
                 AND round(price / area) > 50000 -- выкидываем фейки (врятли цена за метр хаты меньше 50к)
         )

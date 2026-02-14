@@ -1,11 +1,14 @@
 import duckdb
 from airflow.hooks.base import BaseHook
+from airflow.utils.log.secrets_masker import mask_secret
 
 
 def get_duckdb_s3_connection(conn_id: str = "s3_conn"):
     """Получение подключения к S3 для duckdb через Airflow Connection"""
     # данные подключения из Airflow
     s3_conn = BaseHook.get_connection(conn_id)
+    mask_secret(s3_conn.login)
+    mask_secret(s3_conn.password)
     access_key = s3_conn.login
     secret_key = s3_conn.password
     # duckdb сам подставляет протокол
