@@ -3,6 +3,7 @@ x-airflow-common:
   &airflow-common
   build:
     context: .
+    # кастомный докерфал для Airflow (либы из requirements.txt (duckdb) и расширения для duckdb уже установлены)
     dockerfile: Dockerfile.airflow
   environment:
     &airflow-common-env
@@ -15,6 +16,7 @@ x-airflow-common:
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+  # /var/run/docker.sock чтобы Airflow мог сам запускать контейнеры (юзается для DockerOperator)
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
@@ -29,7 +31,7 @@ x-airflow-common:
   deploy:
     resources:
       limits:
-        memory: 4G
+        memory: 1.5G # ограничение памяти для Airflow
 
 services:
   minio:
@@ -46,6 +48,28 @@ services:
       TZ: Europe/Moscow
     command: server /data --console-address ":9001"
     restart: always
+# ждет когда minio поднимется, создает бакеты raw и silver
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio_init
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set myminio http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do 
+        echo 'Waiting for MinIO...'; 
+        sleep 2; 
+      done;
+      
+      /usr/bin/mc mb myminio/raw --ignore-existing;
+      /usr/bin/mc mb myminio/silver --ignore-existing;
+      
+      echo 'Buckets created successfully!';
+      exit 0;
+      "
   postgres_dwh:
     image: postgres:13
     container_name: postgres_dwh
@@ -58,6 +82,12 @@ services:
       - "${POSTGRES_PORT}:5432"
     volumes:
       - postgres_dwh_data:/var/lib/postgresql/data
+      - ./init_db:/docker-entrypoint-initdb.d/ # DDL для создания схем и таблиц в DWH, ток при первом запуске
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
     restart: always
   postgres:
     image: postgres:13
@@ -107,6 +137,7 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
+# выполняет миграцию базы, создает админского юзера, создает коннекшены для postgres и minio, подтягивает парометры из .env
   airflow-init:
     <<: *airflow-common
     entrypoint: /bin/bash
@@ -115,12 +146,24 @@ services:
       - |
         airflow db migrate && \
         airflow users create \
-          --username "$${_AIRFLOW_WWW_USER_USERNAME}" \
-          --password "$${_AIRFLOW_WWW_USER_PASSWORD}" \
+          --username "${_AIRFLOW_WWW_USER_USERNAME}" \
+          --password "${_AIRFLOW_WWW_USER_PASSWORD}" \
           --firstname Ilyas \
           --lastname Admin \
           --role Admin \
-          --email "$${_AIRFLOW_WWW_USER_EMAIL}"
+          --email "${_AIRFLOW_WWW_USER_EMAIL}" || true && \
+        airflow connections add 'pg_conn' \
+          --conn-type 'postgres' \
+          --conn-login "${POSTGRES_USER}" \
+          --conn-password "${POSTGRES_PASSWORD}" \
+          --conn-host 'postgres_dwh' \
+          --conn-port '5432' \
+          --conn-schema "${POSTGRES_DB}" || true && \
+        airflow connections add 's3_conn' \
+          --conn-type 'aws' \
+          --conn-login "${MINIO_ROOT_USER}" \
+          --conn-password "${MINIO_ROOT_PASSWORD}" \
+          --conn-extra "{\"endpoint_url\": \"http://minio:9000\", \"addressing_style\": \"path\"}" || true
     environment:
       <<: *airflow-common-env
       _AIRFLOW_DB_MIGRATE: 'true'
@@ -128,7 +171,6 @@ services:
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME}
       _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD}
       _AIRFLOW_WWW_USER_EMAIL: ${_AIRFLOW_WWW_USER_EMAIL}
-      _PIP_ADDITIONAL_REQUIREMENTS: ''
     user: "0:0"
     volumes:
       - ${AIRFLOW_PROJ_DIR:-.}:/sources
