@@ -116,7 +116,8 @@ def get_and_transform_raw_data_to_silver_s3(**context) -> dict[str, int]:
                 parsed_at::TIMESTAMP as parsed_at,
                 description::TEXT as description,
                 -- нормализованный адрес, ток для дедубликации
-                lower(regexp_replace(address, '[^а-яА-Я0-9]', '', 'g')) as norm_address
+                lower(regexp_replace(address, '[^а-яА-Я0-9]', '', 'g')) as norm_address,
+                md5(concat_ws('|', norm_address, floor, total_floors, rooms_count, area)) as flat_hash
             FROM read_json_auto('{raw_s3_key}')
         ),
         -- дедубликация по бизнес ключу (чистый адрес, этажи, кол-во комнат)

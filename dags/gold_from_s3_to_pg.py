@@ -34,11 +34,12 @@ LONG_DESCRIPTION = """
     - Выполняет SQL-скрипт обновления истории изменений цен в таблице `history_flats`.
     - Реализует логику **SCD2**.
 
-### Логика SCD2:
-Отслеживаем изменения поля `price`. Если у квартиры с тем же `flat_id` изменилась цена:
-- Поле `effective_to` у старой записи устанавливается равным дате, когда данные были спарсены.
-- Поле `is_active` старой записи становится `FALSE`.
-- Вставляется новая запись с `is_active = TRUE` и `effective_from = parsed_at`.
+### Логика SCD2 (Бизнес-ключ):
+Отслеживаем изменения поля `price` для уникального объекта (`flat_hash`).
+Если цена изменилась:
+- Поле `effective_to` у текущей записи закрывается датой парсинга.
+- Поле `is_active` становится `FALSE`.
+- Вставляется новая запись с новой ценой, `is_active = TRUE` и `effective_from = parsed_at`.
 """
 
 
@@ -82,13 +83,13 @@ def load_silver_data_from_s3_to_pg(**context) -> None:
             TRUNCATE TABLE flats_db.gold.stage_flats;
             
             INSERT INTO flats_db.gold.stage_flats (
-                flat_id, link, title, price, is_apartament, is_studio, area, 
+                flat_hash, link, title, price, is_apartament, is_studio, area, 
                 rooms_count, floor, total_floors, is_new_moscow, address, 
                 city, okrug, district, metro_name, metro_min, metro_type, 
                 parsed_at
             )
             SELECT 
-                id, link, title, price, is_apartament, is_studio, area, 
+                flat_hash, link, title, price, is_apartament, is_studio, area, 
                 rooms_count, floor, total_floors, is_new_moscow, address, 
                 city, okrug::flats_db.gold.okrug_name, district,
                 metro_name, metro_min, metro_type::flats_db.gold.transport_type, parsed_at

@@ -5,7 +5,7 @@ CREATE TYPE gold.okrug_name AS ENUM('НАО', 'ТАО', 'ЦАО', 'САО', 'Ю�
 
 CREATE TABLE IF NOT EXISTS gold.history_flats (
 	id SERIAL PRIMARY KEY,
-	flat_id BIGINT not null,
+	flat_hash TEXT not null,
 	link TEXT not null,
 	title VARCHAR(100) not null,
 	price BIGINT not null,
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS gold.history_flats (
 );
 
 CREATE TABLE IF NOT EXISTS gold.stage_flats (
-    flat_id BIGINT,
+    flat_hash TEXT,
     link TEXT,
     title VARCHAR(100),
     price BIGINT,
