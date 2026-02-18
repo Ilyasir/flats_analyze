@@ -23,7 +23,7 @@ def get_duckdb_s3_connection(conn_id: str = "s3_conn") -> duckdb.DuckDBPyConnect
 
     con = duckdb.connect()
     # указываем папку с расширениями для duckdb и загружаем httpfs для работы с S3
-    con.execute("SET extension_directory = '/opt/airflow/duckdb_extensions';")  # , если нужно
+    con.execute("SET extension_directory = '/opt/airflow/duckdb_extensions';")
     con.execute("LOAD httpfs;")
 
     con.execute(f"""

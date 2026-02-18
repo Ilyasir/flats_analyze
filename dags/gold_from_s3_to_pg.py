@@ -9,6 +9,7 @@ from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from airflow.utils.log.secrets_masker import mask_secret
 from utils.datasets import SILVER_DATASET_CIAN_FLATS
 from utils.duckdb import get_duckdb_s3_connection
+from utils.sql import load_sql
 
 OWNER = "ilyas"
 DAG_ID = "gold_from_s3_to_pg"
@@ -66,6 +67,7 @@ def load_silver_data_from_s3_to_pg(**context) -> None:
 
     try:
         logging.info(f"💻 Загружаю данные из {silver_s3_key} в stage таблицу")
+        # создаем секрет для подключения к постгре
         con.execute(
             f"""
             LOAD postgres;
@@ -76,27 +78,10 @@ def load_silver_data_from_s3_to_pg(**context) -> None:
                 DATABASE '{pg_conn.schema}',
                 USER '{pg_conn.login}',
                 PASSWORD '{pg_conn.password}'
-            );
-
-            ATTACH '' AS flats_db (TYPE postgres, SECRET dwh_postgres);
-
-            TRUNCATE TABLE flats_db.gold.stage_flats;
-            
-            INSERT INTO flats_db.gold.stage_flats (
-                flat_hash, link, title, price, is_apartament, is_studio, area, 
-                rooms_count, floor, total_floors, is_new_moscow, address, 
-                city, okrug, district, metro_name, metro_min, metro_type, 
-                parsed_at
-            )
-            SELECT 
-                flat_hash, link, title, price, is_apartament, is_studio, area, 
-                rooms_count, floor, total_floors, is_new_moscow, address, 
-                city, okrug::flats_db.gold.okrug_name, district,
-                metro_name, metro_min, metro_type::flats_db.gold.transport_type, parsed_at
-            FROM read_parquet('{silver_s3_key}');
-            """
+            );"""
         )
 
+        con.execute(load_sql("silver_to_stage_dwh.sql", silver_s3_key=silver_s3_key))
     finally:
         con.close()
     logging.info("✅ Успешно загружено в stage таблицу")
@@ -124,7 +109,7 @@ with DAG(
         task_id="merge_from_stage_to_history",
         conn_id="pg_conn",
         autocommit=False,
-        sql="sql/stage_to_history_scd2.sql",
+        sql=load_sql("stage_to_history_scd2.sql"),
         show_return_value_in_logs=True,
     )
 

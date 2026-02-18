@@ -7,6 +7,7 @@ from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
 from utils.datasets import RAW_DATASET_CIAN_FLATS, SILVER_DATASET_CIAN_FLATS
 from utils.duckdb import get_duckdb_s3_connection
+from utils.sql import load_sql
 
 OWNER = "ilyas"
 DAG_ID = "silver_from_s3_to_s3"
@@ -47,104 +48,22 @@ default_args = {
 def get_and_transform_raw_data_to_silver_s3(**context) -> dict[str, int]:
     """Очистка, дедубликация данных из слоя raw в silver .parquet и сохранение в S3"""
     dt = context["data_interval_end"].in_timezone("Europe/Moscow")
-    raw_s3_key = (
-        f"s3://{LAYER_SOURCE}/cian/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/flats.jsonl"
-    )
-    silver_s3_key = (
-        f"s3://{LAYER_TARGET}/cian/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/flats.parquet"
+    base_path = f"cian/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}"
+
+    raw_s3_key = f"s3://{LAYER_SOURCE}/{base_path}/flats.jsonl"
+    silver_s3_key = f"s3://{LAYER_TARGET}/{base_path}/flats.parquet"
+
+    transform_raw_to_silver_query = load_sql(
+        "transform_raw_to_silver.sql",
+        raw_s3_key=raw_s3_key,
+        silver_s3_key=silver_s3_key,
     )
 
     con = get_duckdb_s3_connection("s3_conn")
 
-    raw_to_silver_query = f"""
-        COPY(
-        WITH raw_transformed AS (
-            SELECT
-                id::BIGINT as id,
-                -- укорачиваем ссылку
-                SPLIT_PART(link, '?', 1)::TEXT as link,
-                title::VARCHAR as title,
-                -- тип жилья
-                CASE
-                    WHEN title ILIKE '%апартаменты%' THEN TRUE
-                    ELSE FALSE
-                END as is_apartament,
-                CASE
-                    WHEN title ILIKE '%студия%' THEN TRUE
-                    ELSE FALSE
-                END as is_studio,
-                -- площадь из заголовка, число перед м², запятую на точку поменяем
-                replace(
-                    regexp_replace(
-                        NULLIF(regexp_extract(title, '([\d\s]+[.,]?\d*)\s*м²', 1), ''),
-                        '\s+', '', 'g'
-                    ), 
-                    ',', '.'
-                )::NUMERIC(10, 2) AS area,
-                -- комнатность (0 для студий)
-                CASE 
-                    WHEN title ILIKE '%студия%' THEN 0
-                    ELSE NULLIF(regexp_extract(title, '^(\d+)', 1), '')::INT
-                END as rooms_count,
-                -- этажи
-                NULLIF(regexp_extract(title, '(\d+)/\d+\s*этаж', 1), '')::INT as floor,
-                NULLIF(regexp_extract(title, '\d+/(\d+)\s*этаж', 1), '')::INT as total_floors,
-                -- цена, убираем валюту и пробелы 
-                regexp_replace(price, '[^0-9]', '', 'g')::BIGINT as price,
-                address::TEXT as address,
-                -- разбиваем адрес
-                SPLIT_PART(address, ',', 1)::VARCHAR as city,
-                -- округ только заглавными
-                NULLIF(regexp_extract(address, '([А-Яа-я]+АО)', 1), '')::VARCHAR as okrug,
-                -- район, для новой москвы null, слишком нестабильно 
-                CASE
-                    WHEN okrug IN ('НАО', 'ТАО') THEN NULL
-                    ELSE NULLIF(regexp_extract(address, '(р-н\s?[^,]+)', 1), '')::VARCHAR
-                END as district,
-                CASE
-                    WHEN okrug IN ('НАО', 'ТАО') THEN TRUE
-                    ELSE FALSE
-                END as is_new_moscow,
-                -- вся инфа о метро
-                NULLIF(regexp_extract(metro, '^(.*?)\d+\s+минут', 1), '')::VARCHAR as metro_name,
-                NULLIF(regexp_extract(metro, '(\d+)\s+минут', 1), '')::INT as metro_min,
-                CASE
-                    WHEN metro LIKE '%пешком%' THEN 'walk'
-                    WHEN metro LIKE '%транс%' THEN 'transport'
-                END as metro_type,
-                -- время и описание
-                parsed_at::TIMESTAMP as parsed_at,
-                description::TEXT as description,
-                -- нормализованный адрес, ток для дедубликации
-                lower(regexp_replace(address, '[^а-яА-Я0-9]', '', 'g')) as norm_address,
-                md5(concat_ws('|', norm_address, floor, total_floors, rooms_count, area)) as flat_hash
-            FROM read_json_auto('{raw_s3_key}')
-        ),
-        -- дедубликация по бизнес ключу (чистый адрес, этажи, кол-во комнат)
-        deduplicated AS (
-            SELECT *,
-                ROW_NUMBER() OVER (
-                    PARTITION BY norm_address, floor, total_floors, rooms_count
-                    ORDER BY parsed_at DESC
-                ) as row_num
-            FROM raw_transformed
-            WHERE area IS NOT NULL -- выкидываем строки с битыми данными
-                AND price IS NOT NULL
-                AND okrug IS NOT NULL
-                AND rooms_count IS NOT NULL
-                AND (district IS NOT NULL OR is_new_moscow) -- у новой москвы может не быть райнов
-                AND round(price / area) > 50000 -- выкидываем фейки (врятли цена за метр хаты меньше 50к)
-        )
-        -- сохраняем в parquet, EXLUDE убирает ненужные колонки
-        SELECT * EXCLUDE (row_num, norm_address)
-        FROM deduplicated
-        WHERE row_num = 1) TO '{silver_s3_key}' (FORMAT PARQUET, OVERWRITE TRUE);
-    """
-
     try:
         logging.info(f"💻 Выполняю трансформацию: {raw_s3_key}")
-        con.execute(raw_to_silver_query)
-
+        con.execute(transform_raw_to_silver_query)
     finally:
         con.close()
 
@@ -163,23 +82,16 @@ def check_silver_data_quality(**context):
     raw_s3_key = keys["raw_s3_key"]
     silver_s3_key = keys["silver_s3_key"]
 
+    silver_dq_query = load_sql(
+        "silver_dq.sql",
+        silver_s3_key=silver_s3_key,
+    )
+
     con = get_duckdb_s3_connection("s3_conn")
 
     try:
-        logging.info("💻 Выполняю проверку данных")
-
-        dq_stats: tuple[int, int, float, float, int, int] = con.execute(
-            f"""
-                SELECT
-                    COUNT(*) as total_rows,
-                    COUNT(distinct district) as all_districts,
-                    COUNT(distinct okrug) as okrugs,
-                    MIN(area) as min_area,
-                    MAX(area) as max_area,
-                    MIN(price) as min_price
-                FROM read_parquet('{silver_s3_key}')
-            """
-        ).fetchone()
+        logging.info(f"💻 Выполняю проверку данных: {silver_s3_key}")
+        dq_stats: tuple[int, int, float, float, int, int] = con.execute(silver_dq_query).fetchone()
 
         raw_total_rows: int = con.execute(f"SELECT count(*) FROM read_json_auto('{raw_s3_key}')").fetchone()[0]
     finally:
@@ -213,7 +125,7 @@ def check_silver_data_quality(**context):
         logging.warning(f"⚠️ Подозрительно маленькая цена: {min_price} руб.")
 
     logging.info("✅ Проверка пройдена")
-    logging.info(f"Удалено дублей и мусора: {diff} строк ({percent_removed:.2f}%).")
+    logging.info(f"🧹 Удалено дублей и мусора: {diff} строк ({percent_removed:.2f}%).")
 
     return {"raw_count": raw_total_rows, "silver_count": silver_total_rows, "removed": diff}
 

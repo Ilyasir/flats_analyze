@@ -8,6 +8,7 @@ from airflow.operators.python import PythonOperator
 from airflow.providers.docker.operators.docker import DockerOperator
 from utils.datasets import RAW_DATASET_CIAN_FLATS
 from utils.duckdb import get_duckdb_s3_connection
+from utils.sql import load_sql
 
 OWNER = "ilyas"
 DAG_ID = "raw_from_parser_to_s3"
@@ -59,18 +60,9 @@ def check_raw_data_quality(**context) -> dict[str, int]:
     con = get_duckdb_s3_connection("s3_conn")
 
     try:
-        logging.info("💻 Выполняю проверку данных")
+        logging.info(f"💻 Выполняю проверку данных: {raw_s3_key}")
         dq_stats: tuple[int, int, int, int, int, int] = con.execute(
-            f"""
-                SELECT
-                    COUNT(*) as total_rows,
-                    COUNT(DISTINCT id) as unique_ids,
-                    COUNT(price) FILTER (WHERE price IS NOT NULL AND price != '') as valid_prices,
-                    COUNT(address) FILTER (WHERE address IS NOT NULL AND address != '') as valid_addresses,
-                    COUNT(metro) FILTER (WHERE metro IS NOT NULL AND metro != '') as valid_metro,
-                    COUNT(description) FILTER (WHERE description IS NOT NULL AND description != '') as valid_description
-                FROM read_json_auto('{raw_s3_key}')
-            """
+            load_sql("raw_dq.sql", raw_s3_key=raw_s3_key)
         ).fetchone()
 
     finally:
@@ -121,7 +113,6 @@ with DAG(
     schedule="0 23 * * *",
     default_args=default_args,
     catchup=False,
-    max_active_tasks=1,
     max_active_runs=1,
     tags=["s3", "raw"],
     description=SHORT_DESCRIPTION,
