@@ -33,9 +33,9 @@ COPY (
             address::TEXT as address,
             SPLIT_PART(address, ',', 1)::VARCHAR as city,
             NULLIF(regexp_extract(address, '([А-Яа-я]+АО)', 1), '')::VARCHAR as okrug,
-            -- район, для новой москвы null, слишком нестабильно (районов там по сути нету)
+            -- район, для новой москвы ставим округ, слишком нестабильно (районов там по сути нету)
             CASE
-                WHEN okrug IN ('НАО', 'ТАО') THEN NULL
+                WHEN okrug IN ('НАО', 'ТАО') THEN okrug
                 ELSE 
                     regexp_replace(
                         NULLIF(regexp_extract(address, '(р-н\s?[^,]+)', 1), ''), 
