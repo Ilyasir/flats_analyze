@@ -20,3 +20,8 @@ logs/
 config/
 plugins/
 *.pid
+
+# metabase
+metabase_data/
+
+docker-compose.override.yml

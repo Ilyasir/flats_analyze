@@ -1,27 +1,20 @@
 **/__pycache__/
 *.pyc
-
-.git/
-.gitignore
-.github/
-
 .venv/
 env/
 .env
+docker-compose.override.yml
 
-.ruff_cache/
-
-.vscode/
-.idea/
-
-Dockerfile  
-docker-compose.yml
-.dockerignore
-
-logs/
-config/
-plugins/
-dags/
-
+# data
 data/
 minio_data/
+metabase_data/
+logs/
+
+# мусор
+.git
+.gitignore
+.github/
+.vscode/
+.idea/
+.ruff_cache/
