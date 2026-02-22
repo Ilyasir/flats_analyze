@@ -5,7 +5,7 @@ from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from utils.datasets import GOLD_DATASET_HISTORY
 
 OWNER = "ilyas"
-DAG_ID = "gold_mart_district_stats"
+DAG_ID = "gold_marts_current_stats"
 
 SHORT_DESCRIPTION = ""
 
@@ -27,7 +27,7 @@ with DAG(
     default_args=default_args,
     catchup=False,
     max_active_runs=1,
-    tags=["mart", "gold", "pg"],
+    tags=["marts", "gold", "pg"],
     description=SHORT_DESCRIPTION,
     doc_md=LONG_DESCRIPTION,
 ) as dag:
@@ -61,8 +61,45 @@ with DAG(
         """,
     )
 
+    build_dm_metro_current = SQLExecuteQueryOperator(
+        task_id="build_dm_metro_current",
+        conn_id="pg_conn",
+        autocommit=True,
+        sql="""
+            TRUNCATE TABLE gold.dm_metro_current;
+
+            INSERT INTO gold.dm_metro_current(
+                metro_name, total_flats, avg_price,
+                avg_price_per_meter, median_price_per_meter,
+                avg_walking_min
+            )
+            with metro_table as (
+                select
+                    metro_name,
+                    count(*) as total_flats,
+                    round(avg(price)) as avg_price,
+                    round(avg(price / area)) as avg_price_per_meter,
+                    round(percentile_cont(0.5) WITHIN GROUP (ORDER BY price / area))::BIGINT as median_price_per_meter,
+                    round(avg(
+                            case
+                                WHEN metro_type = 'walk'
+                                THEN metro_min
+                            END), 2) as avg_walking_min
+                from gold.history_flats as hf
+                where hf.metro_name is not null and is_active = true
+                group by hf.metro_name)
+                select
+                    metro_name, total_flats, avg_price,
+                    avg_price_per_meter, median_price_per_meter,
+                    avg_walking_min
+                from metro_table
+                where total_flats > 20
+                    and avg_walking_min is not null
+        """,
+    )
+
     end = EmptyOperator(
         task_id="end",
     )
 
-    start >> build_dm_district_current >> end
+    start >> [build_dm_district_current, build_dm_metro_current] >> end

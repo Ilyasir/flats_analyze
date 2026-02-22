@@ -9,3 +9,13 @@ CREATE TABLE IF NOT EXISTS gold.dm_district_current (
 	max_price BIGINT,
 	updated_at TIMESTAMP DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS gold.dm_metro_current (
+    metro_name VARCHAR(100) NOT NULL,
+    total_flats INT,
+    avg_price BIGINT,
+    avg_price_per_meter BIGINT,
+    median_price_per_meter BIGINT,
+    avg_walking_min NUMERIC(4, 2),
+	updated_at TIMESTAMP DEFAULT NOW()
+);
