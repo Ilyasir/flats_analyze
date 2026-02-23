@@ -19,3 +19,14 @@ CREATE TABLE IF NOT EXISTS gold.dm_metro_current (
     avg_walking_min NUMERIC(4, 2),
 	updated_at TIMESTAMP DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS gold.dm_district_history (
+    report_date DATE NOT NULL,
+    okrug gold.okrug_name,
+    district VARCHAR(100),
+    total_flats INT,
+    avg_price_per_meter BIGINT,
+    median_price_per_meter BIGINT,
+    updated_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (report_date, district)
+);
