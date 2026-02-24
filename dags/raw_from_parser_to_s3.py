@@ -1,13 +1,14 @@
 import logging
 
+import duckdb
 import pendulum
 from airflow import DAG
 from airflow.exceptions import AirflowFailException
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
 from airflow.providers.docker.operators.docker import DockerOperator
-from utils.datasets import RAW_DATASET_CIAN_FLATS
-from utils.duckdb import get_duckdb_s3_connection
+from utils.datasets import RAW_DATASET_SALES_FLATS
+from utils.duckdb import connect_duckdb_to_s3
 from utils.sql import load_sql
 
 OWNER = "ilyas"
@@ -36,10 +37,10 @@ LONG_DESCRIPTION = """
     - Проверка заполненности полей: цена, адрес, метро, описание.
 
 ### Особенности:
-- **Расписание**: Ежедневно в 23:00 (МСК).
+- **Расписание**: Ежедневно
 - **Идемпотентность**: Ограничена, так как парсер берет текущий срез сайта, невозможно взять данные за конкретную дату.
 Но запуск за конкретную дату перезаписывает файл в соответствующей папке S3.
-- **Триггер**: После выполнения обновляет `RAW_DATASET_CIAN_FLATS`.
+- **Триггер**: После выполнения обновляет `RAW_DATASET_SALES_FLATS`.
 """
 
 
@@ -55,10 +56,10 @@ def check_raw_data_quality(**context) -> dict[str, int]:
     """Проверка качества данных в S3 с помощью duckdb"""
     # Формируем путь к файлу в S3
     dt = context["data_interval_end"].in_timezone("Europe/Moscow")
-    raw_s3_key = f"s3://{LAYER}/cian/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/flats.jsonl"
+    raw_s3_key = f"s3://{LAYER}/sales/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/flats.jsonl"
 
-    con = get_duckdb_s3_connection("s3_conn")
-
+    con = duckdb.connect()
+    connect_duckdb_to_s3(con, "s3_conn")
     try:
         logging.info(f"💻 Выполняю проверку данных: {raw_s3_key}")
         dq_stats: tuple[int, int, int, int, int, int] = con.execute(
@@ -132,14 +133,15 @@ with DAG(
         network_mode="data_network",  # все сервисы в этой сети (парсер тоже), чтобы видеть в minio
         mount_tmp_dir=False,  # временная папка не нужна, так как из контейнера данные сразу идут в S3
         tty=True,  # логи контейнера будут видны в UI Airflow
-        mem_limit="3g",  # ограничение по памяти для контейнера
+        mem_limit="4g",  # ограничение по памяти для контейнера
         shm_size="1g",  # для хрома внутри контейнера, чтобы не было ошибок с памятью при парсинге
         # параметры доступа к S3 через переменные окружения, чтобы внутри контейнера можно было сохранять в S3
         environment={
-            "MINIO_ACCESS_KEY": "{{ conn.s3_conn.login }}",
-            "MINIO_SECRET_KEY": "{{ conn.s3_conn.password }}",
-            "MINIO_ENDPOINT_URL": "{{ conn.s3_conn.extra_dejson.endpoint_url }}",
-            "MINIO_BUCKET_NAME": LAYER,
+            "S3_ACCESS_KEY": "{{ conn.s3_conn.login }}",
+            "S3_SECRET_KEY": "{{ conn.s3_conn.password }}",
+            "S3_ENDPOINT_URL": "{{ conn.s3_conn.extra_dejson.endpoint_url }}",
+            "S3_REGION_NAME": "{{ conn.s3_conn.extra_dejson.region_name }}",
+            "S3_BUCKET_NAME": LAYER,
             "TZ": "Europe/Moscow",
             "EXECUTION_DATE": "{{ data_interval_end.in_timezone('Europe/Moscow').format('YYYY-MM-DD') }}",
         },
@@ -152,7 +154,7 @@ with DAG(
 
     end = EmptyOperator(
         task_id="end",
-        outlets=[RAW_DATASET_CIAN_FLATS],  # обновляем датасет, чтобы запустить следующий DAG
+        outlets=[RAW_DATASET_SALES_FLATS],  # триггерим датасет, чтобы запустить следующий DAG
     )
 
     start >> run_parser >> check_data_quality >> end

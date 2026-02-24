@@ -1,14 +1,13 @@
 import logging
 
+import duckdb
 import pendulum
 from airflow import DAG
-from airflow.hooks.base import BaseHook
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
-from airflow.utils.log.secrets_masker import mask_secret
-from utils.datasets import GOLD_DATASET_HISTORY, SILVER_DATASET_CIAN_FLATS
-from utils.duckdb import get_duckdb_s3_connection
+from utils.datasets import GOLD_DATASET_HISTORY, SILVER_DATASET_SALES_FLATS
+from utils.duckdb import connect_duckdb_to_pg, connect_duckdb_to_s3
 from utils.sql import load_sql
 
 OWNER = "ilyas"
@@ -56,30 +55,14 @@ def load_silver_data_from_s3_to_pg(**context) -> None:
     """Копипаст данных из S3 в stage таблицу postgres, с помощью duckdb"""
     dt = context["data_interval_end"].in_timezone("Europe/Moscow")
     silver_s3_key = (
-        f"s3://{LAYER_SOURCE}/cian/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/flats.parquet"
+        f"s3://{LAYER_SOURCE}/sales/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/flats.parquet"
     )
-    con = get_duckdb_s3_connection("s3_conn")
-    # Получаем параметры для подключения к Postgres из Airflow Connections
-    pg_conn = BaseHook.get_connection("pg_conn")
-    # Маскируем логин и пароль в логах Airflow
-    mask_secret(pg_conn.login)
-    mask_secret(pg_conn.password)
+    con = duckdb.connect()
+    connect_duckdb_to_s3(con, "s3_conn")
+    connect_duckdb_to_pg(con, "pg_conn")
 
     try:
         logging.info(f"💻 Загружаю данные из {silver_s3_key} в stage таблицу")
-        # создаем секрет для подключения к постгре
-        con.execute(
-            f"""
-            LOAD postgres;
-            CREATE SECRET IF NOT EXISTS dwh_postgres (
-                TYPE postgres,
-                HOST '{pg_conn.host}',
-                PORT {pg_conn.port},
-                DATABASE '{pg_conn.schema}',
-                USER '{pg_conn.login}',
-                PASSWORD '{pg_conn.password}'
-            );"""
-        )
 
         con.execute(load_sql("silver_to_stage_dwh.sql", silver_s3_key=silver_s3_key))
     finally:
@@ -89,7 +72,7 @@ def load_silver_data_from_s3_to_pg(**context) -> None:
 
 with DAG(
     dag_id=DAG_ID,
-    schedule=[SILVER_DATASET_CIAN_FLATS],
+    schedule=[SILVER_DATASET_SALES_FLATS],
     default_args=default_args,
     catchup=False,
     max_active_runs=1,

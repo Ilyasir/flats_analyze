@@ -35,6 +35,12 @@ async def collect_flats_from_url(browser, flat_ids: set, url: str, file_obj: str
     if await page.locator(config_parser.CAPCHA_BLOCK_TEXT).count() > 0:
         logger.error(f"❌ БЛОКИРОВКА ИЛИ КАПЧА: {url}")
         raise Exception(f"Капча на {url}")
+    # вытягиваем из заголовка, сколько обьявлений на одном URL показывает сайт
+    header_locator = page.locator('div[data-name="SummaryHeader"] h5')
+    if await header_locator.count() > 0:
+        text = await header_locator.inner_text()
+        logger.info(f"📊 {text} на URL: {url}")
+
     # парсим все страницы, пока есть кнопка пагинации
     for page_num in range(config_parser.MAX_PAGES_TO_PARSE):
         # получаем html страницы и парсим его через bs4
@@ -159,7 +165,7 @@ async def main():
             month = start_time_dt.strftime("%m")
             day = start_time_dt.strftime("%d")
 
-            s3_object_name = f"cian/year={year}/month={month}/day={day}/flats.jsonl"
+            s3_object_name = f"sales/year={year}/month={month}/day={day}/flats.jsonl"
 
             if upload_file_to_s3(final_local, s3_object_name):
                 logger.info(f"✅ Данные успешно сохранены в S3: {s3_object_name}")

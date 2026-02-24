@@ -1,12 +1,13 @@
 import logging
 
+import duckdb
 import pendulum
 from airflow import DAG
 from airflow.exceptions import AirflowFailException
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
-from utils.datasets import RAW_DATASET_CIAN_FLATS, SILVER_DATASET_CIAN_FLATS
-from utils.duckdb import get_duckdb_s3_connection
+from utils.datasets import RAW_DATASET_SALES_FLATS, SILVER_DATASET_SALES_FLATS
+from utils.duckdb import connect_duckdb_to_s3
 from utils.sql import load_sql
 
 OWNER = "ilyas"
@@ -48,7 +49,7 @@ default_args = {
 def get_and_transform_raw_data_to_silver_s3(**context) -> dict[str, int]:
     """Очистка, дедубликация данных из слоя raw в silver .parquet и сохранение в S3"""
     dt = context["data_interval_end"].in_timezone("Europe/Moscow")
-    base_path = f"cian/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}"
+    base_path = f"sales/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}"
 
     raw_s3_key = f"s3://{LAYER_SOURCE}/{base_path}/flats.jsonl"
     silver_s3_key = f"s3://{LAYER_TARGET}/{base_path}/flats.parquet"
@@ -59,8 +60,8 @@ def get_and_transform_raw_data_to_silver_s3(**context) -> dict[str, int]:
         silver_s3_key=silver_s3_key,
     )
 
-    con = get_duckdb_s3_connection("s3_conn")
-
+    con = duckdb.connect()
+    connect_duckdb_to_s3(con, "s3_conn")
     try:
         logging.info(f"💻 Выполняю трансформацию: {raw_s3_key}")
         con.execute(transform_raw_to_silver_query)
@@ -87,7 +88,8 @@ def check_silver_data_quality(**context):
         silver_s3_key=silver_s3_key,
     )
 
-    con = get_duckdb_s3_connection("s3_conn")
+    con = duckdb.connect()
+    connect_duckdb_to_s3(con, "s3_conn")
 
     try:
         logging.info(f"💻 Выполняю проверку данных: {silver_s3_key}")
@@ -116,7 +118,8 @@ def check_silver_data_quality(**context):
         logging.warning(f"⚠️ Много уникальных районов - {districts}")
 
     if min_area < 5:
-        logging.warning(f"⚠️ Слишком маленькая площадь: {min_area} м²")
+        logging.error(f"❌ Слишком маленькая площадь: {min_area} м²")
+        raise AirflowFailException("Маленькая площадь!")
 
     if max_area > 1500:
         logging.warning(f"⚠️ Подозрительно большая площадь: {max_area} м²")
@@ -132,7 +135,7 @@ def check_silver_data_quality(**context):
 
 with DAG(
     dag_id=DAG_ID,
-    schedule=[RAW_DATASET_CIAN_FLATS],  # как только обновится датасет raw запустится этот DAG
+    schedule=[RAW_DATASET_SALES_FLATS],  # как только обновится датасет raw запустится этот DAG
     default_args=default_args,
     catchup=False,
     max_active_runs=1,
@@ -156,7 +159,7 @@ with DAG(
 
     end = EmptyOperator(
         task_id="end",
-        outlets=[SILVER_DATASET_CIAN_FLATS],
+        outlets=[SILVER_DATASET_SALES_FLATS],
     )
 
     start >> transform_to_silver >> check_data_quality >> end

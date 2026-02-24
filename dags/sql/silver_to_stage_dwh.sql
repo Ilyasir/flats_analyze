@@ -1,5 +1,4 @@
 -- Этот SQL делает загрузку из silver в stage в pg, чтобы потом смержить
-ATTACH '' AS flats_db (TYPE postgres, SECRET dwh_postgres); -- подключаем постгрес
 -- очистка stage чтобы не ыбло дубликатов
 TRUNCATE TABLE flats_db.gold.stage_flats;
 -- читаем из silver и пишем в pg
