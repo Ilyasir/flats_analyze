@@ -7,9 +7,15 @@ from utils.datasets import GOLD_DATASET_HISTORY
 OWNER = "ilyas"
 DAG_ID = "gold_mart_district_history"
 
-SHORT_DESCRIPTION = ""
+SHORT_DESCRIPTION = "Расчет исторической динамики цен по районам"
 
 LONG_DESCRIPTION = """
+Этот DAG Формирует временные ряды для анализа изменения цен по районам
+рассчитывает состояние рынка на конкретную дату (`{{ ds }}`).
+Он заглядывает в таблицу с SCD2 (`history_flats`) и выбирает те записи, которые были активны в указанный день.
+
+Идемпотентность. Используется `DELETE` по `report_date` перед вставкой.
+Это позволяет перезапускать даг за любую прошлую дату, дублей не будет
 """
 
 
@@ -34,7 +40,7 @@ with DAG(
     start = EmptyOperator(
         task_id="start",
     )
-
+    # удаляем данные за этот день, если они уже были (для перезапусков)
     clear_mart = SQLExecuteQueryOperator(
         task_id="clear_mart",
         conn_id="pg_conn",
@@ -61,6 +67,7 @@ with DAG(
                 ROUND(avg(price / area))::BIGINT as avg_price_per_meter,
                 round(percentile_cont(0.5) WITHIN GROUP (ORDER BY price / area))::BIGINT as median_price_per_meter
             from gold.history_flats as hf
+            -- Выбираем записи, которые были "живы" на дату расчета ({{ ds }})
             where '{{ ds }}'::DATE >= effective_from::DATE 
             AND '{{ ds }}'::DATE < effective_to::DATE
             group by okrug, district

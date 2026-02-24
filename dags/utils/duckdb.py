@@ -39,10 +39,11 @@ def connect_duckdb_to_s3(con: duckdb.DuckDBPyConnection, conn_id: str = "s3_conn
 
 def connect_duckdb_to_pg(con: duckdb.DuckDBPyConnection, conn_id: str = "pg_conn") -> duckdb.DuckDBPyConnection:
     """Подключение расширения postgres и создание секрета внутри duckdb"""
+    # получаем параметры подключения из Airflow Connection
     pg_conn = BaseHook.get_connection(conn_id)
     mask_secret(pg_conn.login)
     mask_secret(pg_conn.password)
-
+    # создаем секрет внутри duckdb для подключения к Postgres
     con.execute(f"""
         LOAD postgres;
         CREATE SECRET IF NOT EXISTS dwh_postgres (
@@ -54,5 +55,6 @@ def connect_duckdb_to_pg(con: duckdb.DuckDBPyConnection, conn_id: str = "pg_conn
             PASSWORD '{pg_conn.password}'
         );
     """)
+    # сразу примонтируем базу данных, чтобы потом в SQL запросах можно было обращаться к flats_db
     con.execute("ATTACH '' AS flats_db (TYPE postgres, SECRET dwh_postgres);")
     return con

@@ -20,11 +20,11 @@ SHORT_DESCRIPTION = "Загрузка данных из S3 в Postgres DWH с п
 
 LONG_DESCRIPTION = """
 ## DAG: Gold Layer Ingestion (Postgres)
-Этот DAG завершает основной процесс обработки данных, перенося их из объектного хранилища (S3)
-в реляционную бд **PostgreSQL** для последующей аналитики.
+Этот DAG завершает основной процесс обработки данных, перенося их S3
+в реляционную бд **PostgreSQL** для последующих витрин и аналитики
 Сохраняет историю изменений цен на квартиры с помощью **SCD2**.
 
-### Основные этапы:
+### Таски:
 1. **load_from_s3_to_pg_stage**: 
     - Использует **DuckDB** как движок для передачи данных.
     - Через расширение `postgres` и с помощью `ATTACH` подключается напрямую к базе.
@@ -40,6 +40,8 @@ LONG_DESCRIPTION = """
 - Поле `effective_to` у текущей записи закрывается датой парсинга.
 - Поле `is_active` становится `FALSE`.
 - Вставляется новая запись с новой ценой, `is_active = TRUE` и `effective_from = parsed_at`.
+
+Запускается по датасету `SILVER_DATASET_SALES_FLATS` и обновляет `GOLD_DATASET_HISTORY`.
 """
 
 
@@ -57,6 +59,7 @@ def load_silver_data_from_s3_to_pg(**context) -> None:
     silver_s3_key = (
         f"s3://{LAYER_SOURCE}/sales/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/flats.parquet"
     )
+    # подключаемся к duckdb и настраиваем доступ к S3 и postgres
     con = duckdb.connect()
     connect_duckdb_to_s3(con, "s3_conn")
     connect_duckdb_to_pg(con, "pg_conn")
@@ -87,13 +90,13 @@ with DAG(
     load_from_s3_to_pg_stage = PythonOperator(
         task_id="load_from_s3_to_pg_stage", python_callable=load_silver_data_from_s3_to_pg
     )
-
+    # выполняем merge из stage в историю с помощью SQL
     merge_from_stage_to_history = SQLExecuteQueryOperator(
         task_id="merge_from_stage_to_history",
         conn_id="pg_conn",
         autocommit=False,
         sql=load_sql("stage_to_history_scd2.sql"),
-        show_return_value_in_logs=True,
+        show_return_value_in_logs=True,  # для отладки
     )
 
     end = EmptyOperator(
