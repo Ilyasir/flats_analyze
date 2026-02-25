@@ -138,6 +138,20 @@ services:
       resources:
         limits:
           memory: 1G
+  backend:
+    build: ./backend
+    image: fastapi_backend:latest
+    container_name: fastapi
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres_dwh:
+        condition: service_healthy
+    networks:
+      - data_network
+    restart: always
   airflow-webserver:
     <<: *airflow-common
     container_name: airflow_webserver
