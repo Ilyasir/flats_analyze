@@ -1,8 +1,10 @@
+CREATE TYPE userrole AS ENUM ('GUEST', 'USER', 'ADMIN');
+
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(50) UNIQUE NOT NULL,
     hashed_password TEXT NOT NULL,
-    role VARCHAR(20) NOT NULL DEFAULT 'guest',
+    role userrole NOT NULL DEFAULT 'GUEST',
     is_active BOOLEAN DEFAULT TRUE
 );
 

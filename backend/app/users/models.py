@@ -3,13 +3,14 @@ from enum import Enum
 
 from app.database import Base
 from sqlalchemy import ForeignKey, String
+from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 
 class UserRole(Enum):
-    GUEST = "guest"
-    USER = "user"
-    ADMIN = "admin"
+    GUEST = "GUEST"
+    USER = "USER"
+    ADMIN = "ADMIN"
 
 
 class User(Base):
@@ -18,10 +19,12 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(nullable=False)
-    role: Mapped[UserRole] = mapped_column(default=UserRole.GUEST, server_default="guest")
+    role: Mapped[UserRole] = mapped_column(
+        PG_ENUM(UserRole, name="userrole", create_type=False), default=UserRole.GUEST, server_default="GUEST"
+    )
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
 
-    # Связь с токенами
+    # связь с токенами
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
