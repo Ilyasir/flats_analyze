@@ -81,6 +81,7 @@ services:
       
       /usr/bin/mc mb myminio/raw --ignore-existing;
       /usr/bin/mc mb myminio/silver --ignore-existing;
+      /usr/bin/mc mb myminio/ml-data --ignore-existing;
       
       echo 'Buckets created successfully!';
       exit 0;
