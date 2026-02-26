@@ -1,0 +1,36 @@
+from datetime import datetime
+from enum import Enum
+
+from app.database import Base
+from sqlalchemy import ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+
+class UserRole(Enum):
+    GUEST = "guest"
+    USER = "user"
+    ADMIN = "admin"
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(nullable=False)
+    role: Mapped[UserRole] = mapped_column(default=UserRole.GUEST, server_default="guest")
+    is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
+
+    # Связь с токенами
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    token: Mapped[str] = mapped_column(nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="refresh_tokens")

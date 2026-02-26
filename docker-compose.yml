@@ -142,6 +142,8 @@ services:
     build: ./backend
     image: fastapi_backend:latest
     container_name: fastapi
+    env_file:
+      - .env
     volumes:
       - ./backend:/app
     ports:
