@@ -54,6 +54,10 @@ class AuthService:
         if not user or not verify_password(password, user.hashed_password):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверное имя пользователя или пароль")
 
+        # чекаем на бан
+        if not user.is_active:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ваш аккаунт забанен")
+
         return await self._generate_and_save_tokens(user)
 
     async def refresh_tokens(self, refresh_token: str):
