@@ -6,7 +6,7 @@ python-multipart==0.0.20
 python-jose[cryptography]==3.3.0
 cryptography==46.0.3
 passlib==1.7.4
-bcrypt==4.3.0
+bcrypt<4.1.0
 # Database
 SQLAlchemy==2.0.36
 asyncpg==0.29.0

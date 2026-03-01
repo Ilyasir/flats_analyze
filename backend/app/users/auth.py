@@ -1,5 +1,6 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+from app.core.config import settings
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -7,7 +8,7 @@ from app.core.security import (
     get_password_hash,
     verify_password,
 )
-from app.users.models import RefreshToken, User
+from app.users.models import RefreshToken, User, UserRole
 from app.users.repository import UserRepository
 from fastapi import HTTPException, status
 from sqlalchemy import delete, select
@@ -30,7 +31,7 @@ class AuthService:
         new_refresh = RefreshToken(
             user_id=user.id,
             token=refresh_token,
-            expires_at=datetime.now(UTC).replace(tzinfo=None),
+            expires_at=datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
         )
         self.session.add(new_refresh)
         await self.session.commit()
@@ -43,7 +44,8 @@ class AuthService:
             raise HTTPException(status_code=400, detail="Пользователь уже существует")
 
         hashed_password = get_password_hash(password)
-        new_user = await self.user_repo.add(username=username, hashed_password=hashed_password)
+
+        new_user = await self.user_repo.add(username=username, hashed_password=hashed_password, role=UserRole.USER)
         await self.session.commit()
         return new_user
 
@@ -63,8 +65,11 @@ class AuthService:
         result = await self.session.execute(query)
         token_db = result.scalar_one_or_none()
 
-        if not token_db or token_db.expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
-            raise HTTPException(status_code=401, detail="Refresh токен истек или не найден")
+        if not token_db:
+            raise HTTPException(status_code=401, detail="Refresh токен не найден")
+
+        if token_db.expires_at < datetime.now(UTC):
+            raise HTTPException(status_code=401, detail="Refresh токен истек")
 
         user = await self.user_repo.find_one_or_none(id=token_db.user_id)
         if not user:
