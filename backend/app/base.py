@@ -8,8 +8,8 @@ class BaseRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def find_all(self, **filter_by):
-        query = select(self.model).filter_by(**filter_by)
+    async def find_all(self, limit: int = 100, offset: int = 0, **filter_by):
+        query = select(self.model).filter_by(**filter_by).limit(limit).offset(offset).order_by(self.model.id)
         result = await self.session.execute(query)
         return result.scalars().all()
 
