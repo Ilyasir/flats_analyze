@@ -55,3 +55,16 @@ CREATE TABLE IF NOT EXISTS gold.stage_flats (
     metro_type gold.transport_type,
     parsed_at TIMESTAMP
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_history_flats_active_hash 
+ON gold.history_flats (flat_hash) 
+WHERE is_active = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_stage_flats_hash
+ON gold.stage_flats (flat_hash, price);
+
+CREATE INDEX IF NOT EXISTS idx_history_flats_period 
+ON gold.history_flats (effective_from, effective_to);
+
+CREATE INDEX IF NOT EXISTS idx_history_flats_district 
+ON gold.history_flats (okrug, district);
