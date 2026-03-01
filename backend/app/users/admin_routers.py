@@ -12,7 +12,10 @@ router = APIRouter(prefix="/admin", tags=["Admin"], dependencies=[Depends(allow_
 @router.get("/users/{user_id}", response_model=SUserResponse)
 async def get_user(user_id: int, db: AsyncSession = Depends(get_db)):
     user_repo = UserRepository(db)
-    return await user_repo.find_one_or_none(id=user_id)
+    user = await user_repo.find_one_or_none(id=user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return user
 
 
 @router.get("/users", response_model=list[SUserResponse])

@@ -15,12 +15,15 @@ class UserRole(Enum):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = {"schema": "app"}
 
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(nullable=False)
     role: Mapped[UserRole] = mapped_column(
-        PG_ENUM(UserRole, name="userrole", create_type=False), default=UserRole.GUEST, server_default="GUEST"
+        PG_ENUM(UserRole, name="userrole", schema="app", create_type=False),
+        default=UserRole.GUEST,
+        server_default="GUEST",
     )
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
 
@@ -30,9 +33,10 @@ class User(Base):
 
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
+    __table_args__ = {"schema": "app"}
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("app.users.id", ondelete="CASCADE"), unique=True, index=True)
     token: Mapped[str] = mapped_column(nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
