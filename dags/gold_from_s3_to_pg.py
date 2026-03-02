@@ -9,6 +9,7 @@ from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from utils.datasets import GOLD_DATASET_HISTORY, SILVER_DATASET_SALES_FLATS
 from utils.duckdb import connect_duckdb_to_pg, connect_duckdb_to_s3
 from utils.sql import load_sql
+from utils.telegram import on_failure_callback
 
 OWNER = "ilyas"
 DAG_ID = "gold_from_s3_to_pg"
@@ -50,6 +51,7 @@ default_args = {
     "start_date": pendulum.datetime(2026, 1, 18, tz="Europe/Moscow"),
     "retries": 2,
     "retry_delay": pendulum.duration(minutes=10),
+    "on_failure_callback": on_failure_callback,
 }
 
 

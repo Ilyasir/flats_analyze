@@ -8,6 +8,7 @@ from airflow.operators.python import PythonOperator
 from airflow.providers.docker.operators.docker import DockerOperator
 from utils.datasets import GOLD_DATASET_HISTORY
 from utils.duckdb import connect_duckdb_to_pg, connect_duckdb_to_s3
+from utils.telegram import on_failure_callback, on_success_callback
 
 OWNER = "ilyas"
 DAG_ID = "ml_train_price_model"
@@ -34,8 +35,9 @@ LONG_DESCRIPTION = """
 default_args = {
     "owner": OWNER,
     "start_date": pendulum.datetime(2026, 1, 18, tz="Europe/Moscow"),
-    "retries": 2,
-    "retry_delay": pendulum.duration(minutes=10),
+    "retries": 1,
+    "retry_delay": pendulum.duration(minutes=5),
+    "on_failure_callback": on_failure_callback,
 }
 
 
@@ -146,6 +148,7 @@ with DAG(
             "DATASET_S3_KEY": "{{ task_instance.xcom_pull(task_ids='prepare_training_dataset')['dataset_s3_key'] }}",
             "MODEL_S3_KEY": "{{ task_instance.xcom_pull(task_ids='prepare_training_dataset')['model_s3_key'] }}",
         },
+        on_success_callback=on_success_callback,
     )
 
     end = EmptyOperator(

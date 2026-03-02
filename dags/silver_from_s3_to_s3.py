@@ -9,6 +9,7 @@ from airflow.operators.python import PythonOperator
 from utils.datasets import RAW_DATASET_SALES_FLATS, SILVER_DATASET_SALES_FLATS
 from utils.duckdb import connect_duckdb_to_s3
 from utils.sql import load_sql
+from utils.telegram import on_failure_callback, on_success_callback
 
 OWNER = "ilyas"
 DAG_ID = "silver_from_s3_to_s3"
@@ -45,6 +46,7 @@ default_args = {
     "start_date": pendulum.datetime(2026, 1, 18, tz="Europe/Moscow"),
     "retries": 2,
     "retry_delay": pendulum.duration(minutes=10),
+    "on_failure_callback": on_failure_callback,
 }
 
 
@@ -157,6 +159,7 @@ with DAG(
     check_data_quality = PythonOperator(
         task_id="check_data_quality",
         python_callable=check_silver_data_quality,
+        on_success_callback=on_success_callback,
     )
 
     end = EmptyOperator(
