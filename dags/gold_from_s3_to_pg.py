@@ -3,6 +3,7 @@ import logging
 import duckdb
 import pendulum
 from airflow import DAG
+from airflow.exceptions import AirflowFailException
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
@@ -74,6 +75,19 @@ def load_silver_data_from_s3_to_pg(**context) -> None:
     logging.info("✅ Успешно загружено в stage таблицу")
 
 
+def check_merge_data(**context):
+    """Проверяем, что после мержа количество активных записей в истории равно количеству записей в stage"""
+    metrics = context["ti"].xcom_pull(task_ids="merge_from_stage_to_history")
+    if not metrics:
+        raise AirflowFailException()
+
+    total_in_stage, active_after_merge, total_in_history = metrics[0]
+    logging.info(f"📊 Stage: {total_in_stage}, Active: {active_after_merge}, Total: {total_in_history}")
+
+    if total_in_stage != active_after_merge:
+        raise AirflowFailException(f"Stage ({total_in_stage}) != Активные в history ({active_after_merge})")
+
+
 with DAG(
     dag_id=DAG_ID,
     schedule=[SILVER_DATASET_SALES_FLATS],
@@ -100,9 +114,14 @@ with DAG(
         show_return_value_in_logs=True,  # для отладки
     )
 
+    check_data_quality = PythonOperator(
+        task_id="check_data_quality",
+        python_callable=check_merge_data,
+    )
+
     end = EmptyOperator(
         task_id="end",
         outlets=[GOLD_DATASET_HISTORY],
     )
 
-    start >> load_from_s3_to_pg_stage >> merge_from_stage_to_history >> end
+    start >> load_from_s3_to_pg_stage >> merge_from_stage_to_history >> check_data_quality >> end

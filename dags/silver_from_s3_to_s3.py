@@ -109,7 +109,7 @@ def check_silver_data_quality(**context):
     if silver_total_rows == 0:
         raise AirflowFailException("Файл пустой!")
 
-    if percent_removed > 50:
+    if percent_removed > 25:
         logging.error(f"❌ Удалено {percent_removed:.2f}% данных после трансформации.")
         raise AirflowFailException("Слишком много данных удалено!")
 
@@ -128,7 +128,8 @@ def check_silver_data_quality(**context):
         logging.warning(f"⚠️ Подозрительно большая площадь: {max_area} м²")
 
     if min_price < 1_000_000:
-        logging.warning(f"⚠️ Подозрительно маленькая цена: {min_price} руб.")
+        logging.error(f"❌ Слишком маленькая цена: {min_price} руб.")
+        raise AirflowFailException()
 
     logging.info("✅ Проверка пройдена")
     logging.info(f"🧹 Удалено дублей и мусора: {diff} строк ({percent_removed:.2f}%).")
