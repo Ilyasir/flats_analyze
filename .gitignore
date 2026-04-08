@@ -25,3 +25,5 @@ plugins/
 metabase_data/
 
 docker-compose.override.yml
+.pytest_cache
+node_modules
